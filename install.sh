@@ -68,6 +68,8 @@ install_files() {
     
     # Create directories
     mkdir -p /etc/skadik-gate/nodes
+    mkdir -p /etc/cron.d
+    mkdir -p /etc/uci-defaults
     mkdir -p /usr/share/skadik-gate
     mkdir -p /var/log/skadik-gate
     
