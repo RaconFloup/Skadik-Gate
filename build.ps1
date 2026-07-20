@@ -121,6 +121,9 @@ data_dir = os.path.join(pkg_dir, 'data')
 def add_file(t, arcname, filepath, mode):
     with open(filepath, 'rb') as f:
         data = f.read()
+    # Strip \r from text files (Windows -> Linux)
+    if not filepath.endswith(('.gz', '.lmo', '.ipk')):
+        data = data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
     info = tarfile.TarInfo(name=arcname)
     info.size = len(data)
     info.mode = mode
@@ -143,9 +146,9 @@ def add_bytes(t, arcname, data, mode):
 # Build inner tarballs in memory
 import tarfile as _tar
 
-# Build inner tarballs (GNU format for BusyBox/opkg compatibility)
+# Build inner tarballs (USTAR format for maximum compatibility)
 ctrl_buf = io.BytesIO()
-with tarfile.open(fileobj=ctrl_buf, mode='w:gz', format=_tar.GNU_FORMAT) as t:
+with tarfile.open(fileobj=ctrl_buf, mode='w:gz', format=_tar.USTAR_FORMAT) as t:
     for name in sorted(os.listdir(control_dir)):
         fp = os.path.join(control_dir, name)
         mode = 0o755 if name in ('postinst', 'prerm') else 0o644
@@ -153,7 +156,7 @@ with tarfile.open(fileobj=ctrl_buf, mode='w:gz', format=_tar.GNU_FORMAT) as t:
 ctrl_data = ctrl_buf.getvalue()
 
 data_buf = io.BytesIO()
-with tarfile.open(fileobj=data_buf, mode='w:gz', format=_tar.GNU_FORMAT) as t:
+with tarfile.open(fileobj=data_buf, mode='w:gz', format=_tar.USTAR_FORMAT) as t:
     for root, dirs, files in os.walk(data_dir):
         for name in sorted(files):
             fp = os.path.join(root, name)
@@ -164,8 +167,8 @@ data_data = data_buf.getvalue()
 
 deb_bin = b'2.0\n'
 
-# Build outer .ipk as tar.gz with GNU format (BusyBox/opkg compatible)
-with tarfile.open(out_ipk, 'w:gz', format=_tar.GNU_FORMAT) as ipk:
+# Build outer .ipk as tar.gz with USTAR format
+with tarfile.open(out_ipk, 'w:gz', format=_tar.USTAR_FORMAT) as ipk:
     add_bytes(ipk, 'debian-binary', deb_bin, 0o644)
     add_bytes(ipk, 'control.tar.gz', ctrl_data, 0o644)
     add_bytes(ipk, 'data.tar.gz', data_data, 0o644)
