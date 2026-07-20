@@ -1,19 +1,17 @@
 Package: luci-app-skadik-gate
 Version: 1.0.0
 Depends: skadik-gate, luci-base, luci-compat
-Architecture: aarch64_cortex-a53
+Architecture: all
 Maintainer: Skadik <noreply@skadik.dev>
-Section: net
-Filename: luci-app-skadik-gate_1.0.0_all.ipk
-Size: 9905
-Description: Skadik-Gate VPN client
+Section: luci
+Source: https://github.com/RaconFloup/Skadik-Gate
+Description: LuCI web interface for Skadik-Gate VPN client
 
 Package: skadik-gate
 Version: 1.0.0
 Depends: xray-core, curl, kmod-nft-tproxy, nftables, ip-full
-Architecture: aarch64_cortex-a53
+Architecture: all
 Maintainer: Skadik <noreply@skadik.dev>
 Section: net
-Filename: skadik-gate_1.0.0_all.ipk
-Size: 11986
-Description: Skadik-Gate VPN client
+Source: https://github.com/RaconFloup/Skadik-Gate
+Description: Skadik-Gate VPN Client for Remnawave panel
