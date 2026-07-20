@@ -96,10 +96,8 @@ PRERM
     local ipk_path="${BUILD_DIR}/${ipk_name}"
 
     pushd "${pkg_dir}" > /dev/null
-    ar rcsD "${ipk_path}" debian-binary control.tar.gz data.tar.gz
+    tar -czf "${ipk_path}" debian-binary control.tar.gz data.tar.gz
     popd > /dev/null
-
-    gzip -9 -f "${ipk_path}"
 
     local size
     size=$(stat -c%s "${ipk_path}" 2>/dev/null || stat -f%z "${ipk_path}")

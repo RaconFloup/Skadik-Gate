@@ -176,19 +176,13 @@ function Build-IPK {
     tar -czf (Join-Path $PkgDir "control.tar.gz") @controlFiles
     Pop-Location
     
-    # Create .ipk as ar archive
+    # Create .ipk as tar.gz (opkg format)
     $IpkName = "${PkgName}_${Version}_${Arch}.ipk"
     $IpkPath = Join-Path $BuildDir $IpkName
     
-    $arFiles = @(
-        (Join-Path $PkgDir "debian-binary"),
-        (Join-Path $PkgDir "control.tar.gz"),
-        (Join-Path $PkgDir "data.tar.gz")
-    )
-    
-    $arTmp = Join-Path $PkgDir "archive.ar"
-    New-ArArchive -OutputPath $arTmp -Files $arFiles
-    New-GzipFile -InputPath $arTmp -OutputPath $IpkPath
+    Push-Location $PkgDir
+    tar -czf $IpkPath debian-binary control.tar.gz data.tar.gz
+    Pop-Location
     
     $size = (Get-Item $IpkPath).Length
     Write-Host "OK: $IpkName ($size bytes)" -ForegroundColor Green
