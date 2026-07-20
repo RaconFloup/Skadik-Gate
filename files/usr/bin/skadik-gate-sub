@@ -40,6 +40,7 @@ base64_decode() {
 		}
 		printf "%s", result
 	}'
+}
 
 usage() {
 	cat <<EOF
@@ -68,7 +69,7 @@ fetch_subscription() {
 		return 1
 	fi
 
-	local user_agent="SkadikGate/1.0"
+	local user_agent="Happ/"
 	local tmp_file=$(mktemp)
 
 	log "Fetching subscription from: ${sub_url}"
