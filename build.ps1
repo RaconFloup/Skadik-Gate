@@ -91,6 +91,7 @@ function Build-IPK {
     mkdir -p /var/log/skadik-gate
     /etc/init.d/skadik-gate enable 2>/dev/null
 }
+exit 0
 '@ -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "postinst"), $postinst, [System.Text.UTF8Encoding]::new($false))
     
@@ -110,7 +111,7 @@ function Build-IPK {
     # Create control.tar.gz and data.tar.gz via Python (handles LF + Unix permissions)
     $buildPy = Join-Path $PkgDir "build_pkg.py"
     $pyScript = @"
-import tarfile, io, os, sys, gzip, time
+import tarfile, io, os, sys
 
 pkg_dir = sys.argv[1]
 out_ipk = sys.argv[2]
@@ -140,8 +141,11 @@ def add_bytes(t, arcname, data, mode):
     t.addfile(info, io.BytesIO(data))
 
 # Build inner tarballs in memory
+import tarfile as _tar
+
+# Build inner tarballs (GNU format for BusyBox/opkg compatibility)
 ctrl_buf = io.BytesIO()
-with tarfile.open(fileobj=ctrl_buf, mode='w:gz') as t:
+with tarfile.open(fileobj=ctrl_buf, mode='w:gz', format=_tar.GNU_FORMAT) as t:
     for name in sorted(os.listdir(control_dir)):
         fp = os.path.join(control_dir, name)
         mode = 0o755 if name in ('postinst', 'prerm') else 0o644
@@ -149,7 +153,7 @@ with tarfile.open(fileobj=ctrl_buf, mode='w:gz') as t:
 ctrl_data = ctrl_buf.getvalue()
 
 data_buf = io.BytesIO()
-with tarfile.open(fileobj=data_buf, mode='w:gz') as t:
+with tarfile.open(fileobj=data_buf, mode='w:gz', format=_tar.GNU_FORMAT) as t:
     for root, dirs, files in os.walk(data_dir):
         for name in sorted(files):
             fp = os.path.join(root, name)
@@ -160,29 +164,11 @@ data_data = data_buf.getvalue()
 
 deb_bin = b'2.0\n'
 
-# Build outer .ipk as ar archive then gzip (opkg format)
-def ar_entry(name, data, mode=0o644):
-    now = int(time.time())
-    header = bytearray(60)
-    header[0:16] = name.encode('ascii').ljust(16)
-    header[16:28] = str(now).encode('ascii').ljust(12)
-    header[28:34] = b'0'.ljust(6)
-    header[34:40] = b'0'.ljust(6)
-    header[40:48] = ('%o' % mode).encode('ascii').ljust(8)
-    header[48:58] = str(len(data)).encode('ascii').rjust(10)
-    header[58:60] = b'\x60\x0a'
-    result = bytes(header) + data
-    if len(data) % 2:
-        result += b'\n'
-    return result
-
-raw = b'!<arch>\n'
-raw += ar_entry('debian-binary', deb_bin)
-raw += ar_entry('control.tar.gz', ctrl_data)
-raw += ar_entry('data.tar.gz', data_data)
-
-with gzip.open(out_ipk, 'wb') as f:
-    f.write(raw)
+# Build outer .ipk as tar.gz with GNU format (BusyBox/opkg compatible)
+with tarfile.open(out_ipk, 'w:gz', format=_tar.GNU_FORMAT) as ipk:
+    add_bytes(ipk, 'debian-binary', deb_bin, 0o644)
+    add_bytes(ipk, 'control.tar.gz', ctrl_data, 0o644)
+    add_bytes(ipk, 'data.tar.gz', data_data, 0o644)
 
 print('OK: control.tar.gz=%d data.tar.gz=%d ipk=%d' % (len(ctrl_data), len(data_data), os.path.getsize(out_ipk)))
 "@
