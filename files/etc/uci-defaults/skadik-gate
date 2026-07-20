@@ -1,0 +1,16 @@
+#!/bin/sh
+
+include /lib/functions.sh
+
+config_load skadik-gate
+
+mkdir -p /etc/skadik-gate/nodes
+mkdir -p /usr/share/xray
+mkdir -p /var/log/skadik-gate
+
+chmod +x /usr/bin/skadik-gate
+chmod +x /usr/bin/skadik-gate-sub
+chmod +x /usr/share/skadik-gate/*.sh
+chmod +x /etc/init.d/skadik-gate
+
+exit 0

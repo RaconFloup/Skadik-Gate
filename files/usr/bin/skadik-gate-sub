@@ -1,0 +1,316 @@
+#!/bin/sh
+# Skadik-Gate: Subscription fetcher
+# Fetches share links from Remnawave panel and saves parsed outbounds
+
+. /lib/functions.sh
+
+SG_CONF_DIR="/etc/skadik-gate"
+SG_NODES_DIR="${SG_CONF_DIR}/nodes"
+SG_SUB_CACHE="${SG_CONF_DIR}/subscription.cache"
+SG_LINKS_FILE="${SG_CONF_DIR}/links.txt"
+SG_BIN="/usr/share/skadik-gate"
+SG_VLESS_PARSER="${SG_BIN}/vless-parser.sh"
+
+log() { logger -t skadik-gate-sub "$@"; }
+
+usage() {
+	cat <<EOF
+Usage: $0 <command>
+
+Commands:
+  update          Fetch subscription and update nodes
+  list            List available nodes
+  switch <name>   Switch to a specific node
+  test [name]     Test connectivity to node(s)
+  status          Show current active node
+
+Options:
+  -f              Force update (ignore cache)
+EOF
+}
+
+fetch_subscription() {
+	config_load skadik-gate
+	local sub_url
+	config_get sub_url main subscription_url ""
+
+	if [ -z "$sub_url" ]; then
+		log "ERROR: No subscription URL configured"
+		echo "ERROR: No subscription URL configured" >&2
+		return 1
+	fi
+
+	local user_agent="SkadikGate/1.0"
+	local tmp_file=$(mktemp)
+
+	log "Fetching subscription from: ${sub_url}"
+
+	if ! curl -sS -L \
+		--max-time 30 \
+		-A "$user_agent" \
+		-H "Accept: */*" \
+		-o "$tmp_file" \
+		"$sub_url" 2>/dev/null; then
+		log "ERROR: Failed to fetch subscription"
+		rm -f "$tmp_file"
+		return 1
+	fi
+
+	if [ ! -s "$tmp_file" ]; then
+		log "ERROR: Empty subscription response"
+		rm -f "$tmp_file"
+		return 1
+	fi
+
+	local content_type
+	content_type=$(curl -sS -I -A "$user_agent" "$sub_url" 2>/dev/null | grep -i 'content-type' | head -1)
+
+	echo "$content_type" | grep -qi "json"
+	local is_json=$?
+
+	if [ "$is_json" -eq 0 ]; then
+		log "Got Xray JSON subscription format"
+		mv "$tmp_file" "${SG_NODES_DIR}/xray-json-outbounds.json"
+		return 0
+	fi
+
+	mv "$tmp_file" "$SG_LINKS_FILE"
+	log "Subscription fetched: $(wc -l < "$SG_LINKS_FILE") lines"
+	return 0
+}
+
+parse_links() {
+	mkdir -p "$SG_NODES_DIR"
+
+	if [ -f "${SG_NODES_DIR}/xray-json-outbounds.json" ]; then
+		log "Using Xray JSON outbounds directly"
+		return 0
+	fi
+
+	if [ ! -f "$SG_LINKS_FILE" ]; then
+		log "No links file found"
+		return 1
+	fi
+
+	local node_count=0
+
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+
+		case "$line" in
+			vless://*)
+				local parsed
+				parsed=$(echo "$line" | "$SG_VLESS_PARSER")
+				if [ -n "$parsed" ]; then
+					local tag
+					tag=$(echo "$parsed" | sed -n 's/.*"tag": "\([^"]*\)".*/\1/p')
+					if [ -n "$tag" ]; then
+						echo "$parsed" > "${SG_NODES_DIR}/${tag}.outbound"
+						node_count=$((node_count + 1))
+						log "Parsed node: ${tag}"
+					fi
+				fi
+				;;
+			trojan://*)
+				local rest="${line#trojan://}"
+				local pass_host="${rest%%@*}"
+				local remainder="${rest#*@}"
+				local host_port="${remainder%%\?*}"
+				local remainder2="${remainder#*\?}"
+				local params="$remainder2"
+
+				local name="${line##*#}"
+				local host="${host_port%%:*}"
+				local port="${host_port##*:}"
+				port="${port%%#*}"
+				local sni=$(echo "$params" | sed -n 's/.*[&?]sni=\([^&]*\).*/\1/p')
+				local fp=$(echo "$params" | sed -n 's/.*[&?]fp=\([^&]*\).*/\1/p')
+				local alpn=$(echo "$params" | sed -n 's/.*[&?]alpn=\([^&]*\).*/\1/p')
+				local network=$(echo "$params" | sed -n 's/.*[&?]type=\([^&]*\).*/\1/p')
+				local path=$(echo "$params" | sed -n 's/.*[&?]path=\([^&]*\).*/\1/p')
+
+				[ -z "$name" ] && name="${host}:${port}"
+				local tag
+				tag=$(echo "$name" | sed 's/[^a-zA-Z0-9._-]/_/g')
+
+				local trojan_out
+				trojan_out=$("$SG_VLESS_PARSER" --trojan "$name" "$host" "$port" "$pass_host" "$sni" "$fp" "$alpn" "$network" "$path" "$host") 2>/dev/null
+				if [ -z "$trojan_out" ]; then
+					cat > "${SG_NODES_DIR}/${tag}.outbound" <<TROJANEOF
+{
+    "tag": "${tag}",
+    "protocol": "trojan",
+    "settings": {
+        "servers": [{
+            "address": "${host}",
+            "port": ${port},
+            "password": "${pass_host}",
+            "email": ""
+        }]
+    },
+    "streamSettings": {
+        "network": "${network:-tcp}",
+        "security": "tls",
+        "tlsSettings": {"serverName": "${sni:-$host}", "fingerprint": "${fp:-chrome}"}
+    },
+    "mux": {"enabled": false}
+}
+TROJANEOF
+					node_count=$((node_count + 1))
+					log "Parsed node: ${tag}"
+				fi
+				;;
+			ss://*)
+				log "Shadowsocks links require manual configuration"
+				;;
+		esac
+	done < "$SG_LINKS_FILE"
+
+	local active_file="${SG_NODES_DIR}/.active"
+	if [ ! -f "$active_file" ] || [ ! -f "${SG_NODES_DIR}/$(cat "$active_file").outbound" ]; then
+		local first_node
+		first_node=$(ls "${SG_NODES_DIR}"/*.outbound 2>/dev/null | head -1)
+		if [ -n "$first_node" ]; then
+			first_node=$(basename "$first_node" .outbound)
+			echo "$first_node" > "$active_file"
+			log "Auto-selected first node: ${first_node}"
+		fi
+	fi
+
+	log "Parsed ${node_count} nodes total"
+}
+
+update_sub() {
+	log "Starting subscription update..."
+
+	if ! fetch_subscription; then
+		log "Subscription fetch failed"
+		return 1
+	fi
+
+	local old_nodes=$(ls "${SG_NODES_DIR}"/*.outbound 2>/dev/null | wc -l)
+
+	parse_links
+
+	local new_nodes=$(ls "${SG_NODES_DIR}"/*.outbound 2>/dev/null | wc -l)
+	log "Nodes: ${old_nodes} -> ${new_nodes}"
+
+	"${SG_BIN}/config-gen.sh" generate 2>/dev/null
+
+	/etc/init.d/skadik-gate restart 2>/dev/null
+	log "Subscription update complete"
+}
+
+list_nodes() {
+	if [ -f "${SG_NODES_DIR}/.active" ]; then
+		echo "=== Active Node ==="
+		echo "  $(cat "${SG_NODES_DIR}/.active")"
+		echo ""
+	fi
+
+	echo "=== Available Nodes ==="
+	for f in "${SG_NODES_DIR}"/*.outbound; do
+		[ -f "$f" ] || continue
+		local name
+		name=$(basename "$f" .outbound)
+		local active=""
+		if [ -f "${SG_NODES_DIR}/.active" ] && [ "$(cat "${SG_NODES_DIR}/.active")" = "$name" ]; then
+			active=" * ACTIVE"
+		fi
+		local host
+		host=$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$f" | head -1)
+		echo "  ${name} (${host})${active}"
+	done
+}
+
+switch_node() {
+	local target="$1"
+	if [ -z "$target" ]; then
+		echo "Usage: $0 switch <node-name>"
+		return 1
+	fi
+
+	if [ ! -f "${SG_NODES_DIR}/${target}.outbound" ]; then
+		echo "ERROR: Node '${target}' not found"
+		return 1
+	fi
+
+	echo "$target" > "${SG_NODES_DIR}/.active"
+	log "Switched to node: ${target}"
+
+	"${SG_BIN}/config-gen.sh" generate 2>/dev/null
+	/etc/init.d/skadik-gate restart 2>/dev/null
+	echo "Switched to node: ${target}"
+}
+
+test_node() {
+	local target="${1:-$(cat "${SG_NODES_DIR}/.active" 2>/dev/null)}"
+	if [ -z "$target" ]; then
+		echo "No node selected"
+		return 1
+	fi
+
+	local node_file="${SG_NODES_DIR}/${target}.outbound"
+	if [ ! -f "$node_file" ]; then
+		echo "Node '${target}' not found"
+		return 1
+	fi
+
+	local host port
+	host=$(sed -n 's/.*"address": "\([^"]*\)".*/\1/p' "$node_file" | head -1)
+	port=$(sed -n 's/.*"port": \([0-9]*\).*/\1/p' "$node_file" | head -1)
+
+	echo "Testing connectivity to ${host}:${port}..."
+
+	if nc -z -w 5 "$host" "$port" 2>/dev/null; then
+		echo "OK: ${host}:${port} is reachable"
+		return 0
+	else
+		echo "FAIL: ${host}:${port} is unreachable"
+		return 1
+	fi
+}
+
+show_status() {
+	local active
+	active=$(cat "${SG_NODES_DIR}/.active" 2>/dev/null)
+	echo "Active node: ${active:-none}"
+
+	local running
+	running=$(pgrep -f "xray.*run" >/dev/null 2>&1 && echo "running" || echo "stopped")
+	echo "Xray status: ${running}"
+
+	if [ -f "${SG_CONF_DIR}/config.json" ]; then
+		local node_count
+		node_count=$(ls "${SG_NODES_DIR}"/*.outbound 2>/dev/null | wc -l)
+		echo "Available nodes: ${node_count}"
+	fi
+}
+
+case "${1:-}" in
+	update)
+		force=0
+		while [ "${2:-}" = "-f" ]; do shift; force=1; done
+		update_sub
+		;;
+	list)
+		list_nodes
+		;;
+	switch)
+		switch_node "${2:-}"
+		;;
+	test)
+		test_node "${2:-}"
+		;;
+	status)
+		show_status
+		;;
+	-h|--help|"")
+		usage
+		;;
+	*)
+		echo "Unknown command: $1"
+		usage
+		exit 1
+		;;
+esac

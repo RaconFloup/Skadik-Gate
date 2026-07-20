@@ -1,0 +1,83 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+
+USE_PROCD=1
+
+PROG=/usr/bin/xray
+SG_CONF_DIR="/etc/skadik-gate"
+SG_XRAY_CONF="${SG_CONF_DIR}/config.json"
+SG_BIN="/usr/share/skadik-gate"
+SG_GEO_DIR="/usr/share/xray"
+SG_LOG_DIR="/var/log/skadik-gate"
+
+log() { logger -t skadik-gate "$@"; }
+
+start_service() {
+	config_load skadik-gate
+
+	local enabled
+	config_get_bool enabled main enabled 0
+	[ "$enabled" -eq 1 ] || return 0
+
+	mkdir -p "$SG_LOG_DIR"
+	mkdir -p "${SG_CONF_DIR}/nodes"
+	mkdir -p "$SG_GEO_DIR"
+
+	if [ ! -f "$SG_XRAY_CONF" ]; then
+		log "No xray config found, generating..."
+		"${SG_BIN}/config-gen.sh" generate
+	fi
+
+	if [ ! -f "$SG_XRAY_CONF" ]; then
+		log "ERROR: Failed to generate xray config"
+		return 1
+	fi
+
+	log "Starting Skadik-Gate..."
+
+	"${SG_BIN}/tproxy-setup.sh" setup
+	"${SG_BIN}/tproxy-setup.sh" dns-hijack
+
+	procd_open_instance
+	procd_set_param command "$PROG" run -config "$SG_XRAY_CONF"
+	procd_set_param respawn 3600 5 5
+	procd_set_param limits nofile="1000000 1000000"
+	procd_set_param env XRAY_LOCATION_ASSET="$SG_GEO_DIR"
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+
+	config_get_bool health_check main health_check 1
+	if [ "$health_check" -eq 1 ]; then
+		"${SG_BIN}/health-check.sh" loop &
+	fi
+
+	log "Skadik-Gate started"
+}
+
+stop_service() {
+	log "Stopping Skadik-Gate..."
+	"${SG_BIN}/tproxy-setup.sh" cleanup
+
+	local pid_file="/var/run/skadik-gate-health.pid"
+	[ -f "$pid_file" ] && kill "$(cat "$pid_file")" 2>/dev/null
+	rm -f "$pid_file"
+
+	procd_kill_instance "$NAME" 2>/dev/null
+	log "Skadik-Gate stopped"
+}
+
+reload_service() {
+	stop
+	start
+}
+
+service_triggers() {
+	procd_add_reload_trigger "skadik-gate"
+}
+
+service_running() {
+	pidof xray >/dev/null 2>&1
+}
