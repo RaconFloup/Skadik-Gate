@@ -38,7 +38,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: packages
-        path: build/ipk/*.ipk.gz
+        path: build/ipk/*.ipk
 
   release:
     needs: build
@@ -49,17 +49,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: packages
-        path: packages/
-
-    - name: Rename .ipk.gz -> .ipk
-      run: |
-        mkdir -p release
-        for f in packages/*.ipk.gz; do
-          gunzip -k "$f"
-          base=$(basename "$f" .gz)
-          mv "packages/$base" "release/$base"
-        done
-        ls -la release/
+        path: release/
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
