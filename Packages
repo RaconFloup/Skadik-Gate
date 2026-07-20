@@ -1,0 +1,19 @@
+Package: luci-app-skadik-gate
+Version: 1.0.0
+Depends: skadik-gate, luci-base, luci-compat
+Architecture: aarch64_cortex-a53
+Maintainer: Skadik <noreply@skadik.dev>
+Section: net
+Filename: luci-app-skadik-gate_1.0.0_all.ipk
+Size: 5111
+Description: Skadik-Gate VPN client
+
+Package: skadik-gate
+Version: 1.0.0
+Depends: xray-core, curl, kmod-nft-tproxy, nftables, ip-full
+Architecture: aarch64_cortex-a53
+Maintainer: Skadik <noreply@skadik.dev>
+Section: net
+Filename: skadik-gate_1.0.0_all.ipk
+Size: 11939
+Description: Skadik-Gate VPN client
