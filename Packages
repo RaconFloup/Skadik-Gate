@@ -5,7 +5,7 @@ Architecture: aarch64_cortex-a53
 Maintainer: Skadik <noreply@skadik.dev>
 Section: net
 Filename: luci-app-skadik-gate_1.0.0_all.ipk
-Size: 9896
+Size: 9787
 Description: Skadik-Gate VPN client
 
 Package: skadik-gate
@@ -15,5 +15,5 @@ Architecture: aarch64_cortex-a53
 Maintainer: Skadik <noreply@skadik.dev>
 Section: net
 Filename: skadik-gate_1.0.0_all.ipk
-Size: 12237
+Size: 12147
 Description: Skadik-Gate VPN client
