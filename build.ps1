@@ -186,7 +186,9 @@ function Build-IPK {
         (Join-Path $PkgDir "data.tar.gz")
     )
     
-    New-ArArchive -OutputPath $IpkPath -Files $arFiles
+    $arTmp = Join-Path $PkgDir "archive.ar"
+    New-ArArchive -OutputPath $arTmp -Files $arFiles
+    New-GzipFile -InputPath $arTmp -OutputPath $IpkPath
     
     $size = (Get-Item $IpkPath).Length
     Write-Host "OK: $IpkName ($size bytes)" -ForegroundColor Green
