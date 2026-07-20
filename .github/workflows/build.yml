@@ -1,0 +1,41 @@
+name: Build Packages
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses5-dev gawk git subversion \
+          unzip python3 python3-pip python3-setuptools zlib1g-dev libssl-dev
+    
+    - name: Build for x86_64
+      run: |
+        chmod +x build.sh
+        ./build.sh x86_64
+        mkdir -p artifacts
+        cp packages/*.ipk artifacts/
+    
+    - name: Build for aarch64
+      run: |
+        rm -rf build
+        ./build.sh aarch64
+        cp packages/*.ipk artifacts/
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages
+        path: artifacts/*.ipk
+        retention-days: 30

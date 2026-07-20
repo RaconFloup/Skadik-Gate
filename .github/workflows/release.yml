@@ -1,0 +1,113 @@
+name: Build and Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+  pages: write
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses5-dev gawk git subversion \
+          unzip python3 python3-pip python3-setuptools zlib1g-dev libssl-dev
+        
+    - name: Build packages (all architectures)
+      run: |
+        chmod +x build.sh
+        ./build.sh x86_64
+        cp packages/*.ipk /tmp/
+        rm -rf build
+        
+        ./build.sh aarch64
+        cp packages/*.ipk /tmp/
+        rm -rf build
+    
+    - name: Collect all packages
+      run: |
+        mkdir -p release-packages
+        cp /tmp/*.ipk release-packages/
+        ls -la release-packages/
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          release-packages/*.ipk
+        generate_release_notes: true
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages
+        path: release-packages/
+
+  update-feed:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        fetch-depth: 0
+    
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: packages
+        path: packages/
+    
+    - name: Generate Packages file
+      run: |
+        cd packages
+        
+        # Generate Packages for each architecture
+        for arch in aarch64_generic x86_64 arm_cortex-a7; do
+          mkdir -p "../$arch"
+          
+          # Create Packages file
+          for ipk in *.ipk; do
+            echo "Package: $(basename "$ipk" | cut -d_ -f1)" >> "../$arch/Packages"
+            echo "Version: $(basename "$ipk" | cut -d_ -f2)" >> "../$arch/Packages"
+            echo "Architecture: $(echo $arch | tr '_' '-')" >> "../$arch/Packages"
+            echo "Depends: $(dpkg-deb -f "$ipk" Depends 2>/dev/null || echo '')" >> "../$arch/Packages"
+            echo "Filename: packages/$ipk" >> "../$arch/Packages"
+            echo "Size: $(stat -c%s "$ipk")" >> "../$arch/Packages"
+            echo "SHA256sum: $(sha256sum "$ipk" | cut -d' ' -f1)" >> "../$arch/Packages"
+            echo "" >> "../$arch/Packages"
+          done
+          
+          # Move ipks to architecture directory
+          mv *.ipk "../$arch/" 2>/dev/null || true
+          cd ..
+        done
+    - name: Commit feed update
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git diff --cached --quiet || git commit -m "Update packages for ${VERSION}"
+        git push origin gh-pages
