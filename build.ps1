@@ -1,5 +1,5 @@
 # Skadik-Gate: Build .ipk packages on Windows
-# Creates installable OpenWRT packages without SDK
+# Creates proper ar-format .ipk packages compatible with opkg
 #
 # Usage: .\build.ps1
 # Or:    pwsh build.ps1
@@ -19,6 +19,83 @@ Write-Host ""
 if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
+function New-ArArchive {
+    param(
+        [string]$OutputPath,
+        [string[]]$Files
+    )
+    
+    $stream = [System.IO.File]::Create($OutputPath)
+    $writer = [System.IO.BinaryWriter]::new($stream)
+    
+    # ar magic
+    $writer.Write([System.Text.Encoding]::ASCII.GetBytes("!<arch>`n"))
+    
+    foreach ($file in $Files) {
+        $item = Get-Item $file
+        $name = $item.Name
+        $size = $item.Length
+        $data = [System.IO.File]::ReadAllBytes($file)
+        
+        # Header: name(16) + timestamp(12) + owner(6) + group(6) + mode(8) + size(10) + magic(2)
+        $header = New-Object byte[] 60
+        
+        # Name (16 bytes, padded with spaces, trailing /)
+        $nameBytes = [System.Text.Encoding]::ASCII.GetBytes($name + "/")
+        [Array]::Copy($nameBytes, 0, $header, 0, [Math]::Min($nameBytes.Length, 16))
+        
+        # Timestamp (12 bytes)
+        $ts = [System.Text.Encoding]::ASCII.GetBytes("0           ")
+        [Array]::Copy($ts, 0, $header, 16, 12)
+        
+        # Owner (6 bytes)
+        $ow = [System.Text.Encoding]::ASCII.GetBytes("0     ")
+        [Array]::Copy($ow, 0, $header, 28, 6)
+        
+        # Group (6 bytes)
+        [Array]::Copy($ow, 0, $header, 34, 6)
+        
+        # Mode (8 bytes)
+        $mode = [System.Text.Encoding]::ASCII.GetBytes("100644   ")
+        [Array]::Copy($mode, 0, $header, 40, 8)
+        
+        # Size (10 bytes, right-aligned)
+        $sizeStr = $size.ToString().PadLeft(10)
+        $sizeBytes = [System.Text.Encoding]::ASCII.GetBytes($sizeStr)
+        [Array]::Copy($sizeBytes, 0, $header, 48, 10)
+        
+        # Magic (2 bytes)
+        $header[58] = [byte]0x60  # `
+        $header[59] = [byte]0x0A  # \n
+        
+        $writer.Write($header)
+        $writer.Write($data)
+        
+        # Pad to 2-byte boundary
+        if ($size % 2 -ne 0) {
+            $writer.Write([byte]0x0A)
+        }
+    }
+    
+    $writer.Close()
+    $stream.Close()
+}
+
+function New-GzipFile {
+    param(
+        [string]$InputPath,
+        [string]$OutputPath
+    )
+    
+    $inStream = [System.IO.File]::OpenRead($InputPath)
+    $outStream = [System.IO.File]::Create($OutputPath)
+    $gzStream = [System.IO.Compression.GZipStream]::new($outStream, [System.IO.Compression.CompressionLevel]::Optimal)
+    $inStream.CopyTo($gzStream)
+    $gzStream.Close()
+    $inStream.Close()
+    $outStream.Close()
+}
+
 function Build-IPK {
     param(
         [string]$PkgName,
@@ -34,35 +111,35 @@ function Build-IPK {
     $DataDir = Join-Path $PkgDir "data"
     $ControlDir = Join-Path $PkgDir "control"
     
+    if (Test-Path $PkgDir) { Remove-Item -Recurse -Force $PkgDir }
     New-Item -ItemType Directory -Force -Path $DataDir, $ControlDir | Out-Null
     
     # Run copy script
     & $CopyFiles $DataDir
     
-    # Create control file
-    $controlContent = @"
-Package: $PkgName
-Version: $Version
-Depends: $Depends
-Architecture: $Arch
-Maintainer: Skadik <noreply@skadik.dev>
-Section: $Section
-Source: https://github.com/RaconFloup/Skadik-Gate
-Description: $Description
-"@
-    Set-Content -Path (Join-Path $ControlDir "control") -Value $controlContent -Encoding UTF8
+    # Create control file (Unix line endings)
+    $controlLines = @(
+        "Package: $PkgName"
+        "Version: $Version"
+        "Depends: $Depends"
+        "Architecture: $Arch"
+        "Maintainer: Skadik <noreply@skadik.dev>"
+        "Section: $Section"
+        "Source: https://github.com/RaconFloup/Skadik-Gate"
+        "Description: $Description"
+        ""
+    )
+    $controlContent = $controlLines -join "`n"
+    [System.IO.File]::WriteAllText((Join-Path $ControlDir "control"), $controlContent, [System.Text.UTF8Encoding]::new($false))
     
-    # Create conffiles
-    $conffiles = @"
-/etc/config/skadik-gate
-/etc/skadik-gate/
-"@
-    Set-Content -Path (Join-Path $ControlDir "conffiles") -Value $conffiles -Encoding UTF8
+    # conffiles
+    $conffiles = "/etc/config/skadik-gate`n/etc/skadik-gate/`n"
+    [System.IO.File]::WriteAllText((Join-Path $ControlDir "conffiles"), $conffiles, [System.Text.UTF8Encoding]::new($false))
     
-    # Create postinst
-    $postinst = @"
+    # postinst
+    $postinst = @'
 #!/bin/sh
-[ -n "`${IPKG_INSTROOT}" ] || {
+[ -n "${IPKG_INSTROOT}" ] || {
     chmod +x /usr/bin/skadik-gate 2>/dev/null
     chmod +x /usr/bin/skadik-gate-sub 2>/dev/null
     chmod +x /usr/share/skadik-gate/*.sh 2>/dev/null
@@ -71,41 +148,48 @@ Description: $Description
     mkdir -p /var/log/skadik-gate
     /etc/init.d/skadik-gate enable 2>/dev/null
 }
-"@
-    Set-Content -Path (Join-Path $ControlDir "postinst") -Value $postinst -Encoding UTF8
+'@
+    [System.IO.File]::WriteAllText((Join-Path $ControlDir "postinst"), $postinst, [System.Text.UTF8Encoding]::new($false))
     
-    # Create prerm
-    $prerm = @"
+    # prerm
+    $prerm = @'
 #!/bin/sh
-[ -n "`${IPKG_INSTROOT}" ] || {
+[ -n "${IPKG_INSTROOT}" ] || {
     /etc/init.d/skadik-gate stop 2>/dev/null
     /etc/init.d/skadik-gate disable 2>/dev/null
 }
-"@
-    Set-Content -Path (Join-Path $ControlDir "prerm") -Value $prerm -Encoding UTF8
+'@
+    [System.IO.File]::WriteAllText((Join-Path $ControlDir "prerm"), $prerm, [System.Text.UTF8Encoding]::new($false))
     
-    # Create debian-binary
-    Set-Content -Path (Join-Path $PkgDir "debian-binary") -Value "2.0" -Encoding UTF8
+    # debian-binary
+    [System.IO.File]::WriteAllText((Join-Path $PkgDir "debian-binary"), "2.0`n", [System.Text.UTF8Encoding]::new($false))
     
-    # Create data.tar.gz
+    # Create data.tar.gz with tar
     Push-Location $DataDir
-    tar -czf (Join-Path $PkgDir "data.tar.gz") *
+    $dataFiles = Get-ChildItem -Recurse -File | ForEach-Object { $_.FullName.Substring($DataDir.Length + 1) }
+    tar -czf (Join-Path $PkgDir "data.tar.gz") @dataFiles
     Pop-Location
     
-    # Create control.tar.gz
+    # Create control.tar.gz with tar
     Push-Location $ControlDir
-    tar -czf (Join-Path $PkgDir "control.tar.gz") *
+    $controlFiles = Get-ChildItem -File | ForEach-Object { $_.Name }
+    tar -czf (Join-Path $PkgDir "control.tar.gz") @controlFiles
     Pop-Location
     
-    # Create .ipk package (tar archive with specific order)
+    # Create .ipk as ar archive
     $IpkName = "${PkgName}_${Version}_${Arch}.ipk"
     $IpkPath = Join-Path $BuildDir $IpkName
     
-    Push-Location $PkgDir
-    tar -cf $IpkPath debian-binary control.tar.gz data.tar.gz
-    Pop-Location
+    $arFiles = @(
+        (Join-Path $PkgDir "debian-binary"),
+        (Join-Path $PkgDir "control.tar.gz"),
+        (Join-Path $PkgDir "data.tar.gz")
+    )
     
-    Write-Host "OK: $IpkPath" -ForegroundColor Green
+    New-ArArchive -OutputPath $IpkPath -Files $arFiles
+    
+    $size = (Get-Item $IpkPath).Length
+    Write-Host "OK: $IpkName ($size bytes)" -ForegroundColor Green
     return $IpkPath
 }
 
@@ -190,18 +274,13 @@ Write-Host "============================================" -ForegroundColor Green
 Write-Host "  BUILD COMPLETE" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Packages created:" -ForegroundColor Cyan
+Write-Host "Packages:" -ForegroundColor Cyan
 Get-ChildItem "$BuildDir\*.ipk" | ForEach-Object {
-    Write-Host "  $($_.FullName)" -ForegroundColor White
+    Write-Host "  $($_.Name) ($($_.Length) bytes)" -ForegroundColor White
 }
 Write-Host ""
-Write-Host "Install on OpenWRT router:" -ForegroundColor Yellow
-Write-Host "  1. Copy packages to router:"
-Write-Host "     scp $BuildDir\*.ipk root@router-ip:/tmp/" -ForegroundColor White
-Write-Host ""
-Write-Host "  2. Install packages:"
-Write-Host "     ssh root@router-ip 'opkg install /tmp/skadik-gate_*.ipk /tmp/luci-app-skadik-gate_*.ipk'" -ForegroundColor White
-Write-Host ""
-Write-Host "  3. Or use the quick install script:"
-Write-Host "     wget -O- https://raw.githubusercontent.com/RaconFloup/Skadik-Gate/main/install.sh | sh" -ForegroundColor White
+Write-Host "Install on router:" -ForegroundColor Yellow
+Write-Host "  wget -O /tmp/sg.ipk https://raw.githubusercontent.com/RaconFloup/Skadik-Gate/main/build/ipk/skadik-gate_1.0.0_all.ipk" -ForegroundColor White
+Write-Host "  wget -O /tmp/sg-luci.ipk https://raw.githubusercontent.com/RaconFloup/Skadik-Gate/main/build/ipk/luci-app-skadik-gate_1.0.0_all.ipk" -ForegroundColor White
+Write-Host "  opkg install /tmp/sg.ipk /tmp/sg-luci.ipk" -ForegroundColor White
 Write-Host ""
