@@ -108,6 +108,7 @@ install_luci() {
     mkdir -p /usr/lib/lua/luci/controller
     mkdir -p /usr/lib/lua/luci/model/cbi/skadik-gate
     mkdir -p /usr/lib/lua/luci/view/skadik-gate
+    mkdir -p /usr/lib/lua/luci/i18n
     
     download_file "luci-app-skadik-gate/luasrc/controller/skadik-gate.lua" \
         "/usr/lib/lua/luci/controller/skadik-gate.lua"

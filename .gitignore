@@ -1,2 +1,8 @@
 packages/
 *.tar.gz
+build/ipk/skadik-gate/
+build/ipk/luci-app-skadik-gate/
+aarch64_generic/
+mediatek_filogic/
+x86_64/
+release/

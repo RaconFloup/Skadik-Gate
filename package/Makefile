@@ -107,6 +107,11 @@ define Package/luci-app-skadik-gate/install
 	for f in $(PKG_BUILD_DIR)/luci-app-skadik-gate/luasrc/view/skadik-gate/*.htm; do \
 		$(INSTALL_DATA) "$$f" $(1)/usr/lib/lua/luci/view/skadik-gate/ ; \
 	done
+
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	for f in $(PKG_BUILD_DIR)/luci-app-skadik-gate/luasrc/i18n/*.lmo; do \
+		$(INSTALL_DATA) "$$f" $(1)/usr/lib/lua/luci/i18n/ ; \
+	done
 endef
 
 $(eval $(call BuildPackage,skadik-gate))

@@ -1,6 +1,10 @@
 module("luci.controller.skadik-gate", package.seeall)
 
 function index()
+	if not luci.i18n.loadc("skadik-gate") then
+		luci.i18n.loadc("skadik-gate", "en")
+	end
+
 	entry({"admin", "vpn"}, alias("admin", "vpn", "skadik-gate"), _("Skadik-Gate"), 60)
 	entry({"admin", "vpn", "skadik-gate"}, firstchild(), _("Skadik-Gate"), 1)
 	entry({"admin", "vpn", "skadik-gate", "general"}, cbi("skadik-gate/general"), _("General"), 1)

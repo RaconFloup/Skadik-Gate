@@ -248,7 +248,8 @@ $luciFiles = Build-IPK -PkgName "luci-app-skadik-gate" `
         $dirs = @(
             "usr\lib\lua\luci\controller",
             "usr\lib\lua\luci\model\cbi\skadik-gate",
-            "usr\lib\lua\luci\view\skadik-gate"
+            "usr\lib\lua\luci\view\skadik-gate",
+            "usr\lib\lua\luci\i18n"
         )
         foreach ($d in $dirs) {
             New-Item -ItemType Directory -Force -Path (Join-Path $DataDir $d) | Out-Null
@@ -265,6 +266,16 @@ $luciFiles = Build-IPK -PkgName "luci-app-skadik-gate" `
         $views = Get-ChildItem (Join-Path $ScriptDir "luci-app-skadik-gate\luasrc\view\skadik-gate\*.htm")
         foreach ($v in $views) {
             Copy-Item $v.FullName (Join-Path $DataDir "usr\lib\lua\luci\view\skadik-gate\$($v.Name)")
+        }
+
+        # Compile i18n translations
+        $po2lmo = Join-Path $ScriptDir "build\po2lmo.py"
+        $i18nSrc = Join-Path $ScriptDir "luci-app-skadik-gate\luasrc\i18n"
+        $i18nDst = Join-Path $DataDir "usr\lib\lua\luci\i18n"
+        $py = "python"
+        foreach ($po in Get-ChildItem "$i18nSrc\*.po") {
+            $lmoName = $po.BaseName + ".lmo"
+            & $py $po2lmo.FullName $po.FullName (Join-Path $i18nDst $lmoName)
         }
     }
 

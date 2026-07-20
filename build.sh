@@ -1,221 +1,157 @@
 #!/bin/bash
-# Skadik-Gate: Build script for OpenWRT packages
-# Automatically downloads SDK and builds .ipk packages
-#
-# Usage:
-#   ./build.sh                    # Auto-detect architecture
-#   ./build.sh x86_64             # Build for x86_64
-#   ./build.sh aarch64_generic    # Build for ARM64
-#   ./build.sh arm_cortex-a7      # Build for ARM Cortex-A7
+# Skadik-Gate: Build .ipk packages on Linux
+# Usage: ./build.sh [arch]
+# arch: all (default)
 
 set -e
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
-PACKAGES_DIR="${SCRIPT_DIR}/packages"
-OPENWRT_VERSION="24.10.0"
-SDK_BASE_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets"
+BUILD_DIR="${SCRIPT_DIR}/build/ipk"
+VERSION="1.0.0"
+ARCH="all"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-log() { echo -e "${BLUE}[BUILD]${NC} $1"; }
-err() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}  Skadik-Gate Package Builder (Linux)${NC}"
+echo -e "${CYAN}============================================${NC}"
+echo ""
 
-detect_arch() {
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64)      echo "x86/64" ;;
-        aarch64)     echo "aarch64/generic" ;;
-        armv7l)      echo "arm/cortex-a7" ;;
-        *)           err "Unsupported architecture: $arch" ;;
-    esac
+rm -rf "${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}"
+
+compile_po2lmo() {
+    local po_file="$1"
+    local lmo_file="$2"
+    python3 "${SCRIPT_DIR}/build/po2lmo.py" "$po_file" "$lmo_file"
 }
 
-get_sdk_url() {
-    local target="$1"
-    local sdk_pattern="openwrt-sdk-${OPENWRT_VERSION}-${target//\//_}_gcc-*_musl.Linux-x86_64"
-    
-    # Try to find the SDK download link
-    local page_url="${SDK_BASE_URL}/${target}/"
-    log "Looking for SDK at: ${page_url}"
-    
-    # For x86_64
-    if [ "$target" = "x86/64" ]; then
-        echo "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/x86/64/openwrt-sdk-${OPENWRT_VERSION}-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-    elif [ "$target" = "aarch64/generic" ]; then
-        echo "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/aarch64/generic/openwrt-sdk-${OPENWRT_VERSION}-aarch64-generic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-    else
-        err "Please provide SDK URL manually for target: $target"
-    fi
-}
+build_ipk() {
+    local pkg_name="$1"
+    local description="$2"
+    local depends="$3"
+    local section="$4"
+    local build_files_func="$5"
 
-download_sdk() {
-    local target="$1"
-    local sdk_dir="${BUILD_DIR}/openwrt-sdk"
-    
-    if [ -d "$sdk_dir" ]; then
-        log "SDK already downloaded at ${sdk_dir}"
-        return 0
-    fi
-    
-    mkdir -p "$BUILD_DIR"
-    
-    local sdk_url
-    sdk_url=$(get_sdk_url "$target")
-    
-    log "Downloading SDK from: ${sdk_url}"
-    
-    local archive="${BUILD_DIR}/sdk.tar.zst"
-    curl -L -o "$archive" "$sdk_url" || err "Failed to download SDK"
-    
-    log "Extracting SDK..."
-    cd "$BUILD_DIR"
-    
-    if command -v zstd &>/dev/null; then
-        zstd -d "$archive" -o sdk.tar 2>/dev/null || tar --zstd -xf "$archive"
-    else
-        tar --zstd -xf "$archive"
-    fi
-    
-    # Find and rename the extracted directory
-    local extracted=$(ls -d openwrt-sdk-* 2>/dev/null | head -1)
-    if [ -n "$extracted" ]; then
-        mv "$extracted" "openwrt-sdk"
-    fi
-    
-    rm -f "$archive"
-    log "SDK extracted to ${sdk_dir}"
-}
+    echo ""
+    echo -e "${YELLOW}Building ${pkg_name}...${NC}"
 
-setup_sdk() {
-    local sdk_dir="${BUILD_DIR}/openwrt-sdk"
-    
-    log "Updating SDK feeds..."
-    cd "$sdk_dir"
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
-    
-    log "SDK ready"
-}
+    local pkg_dir="${BUILD_DIR}/${pkg_name}"
+    local data_dir="${pkg_dir}/data"
+    local control_dir="${pkg_dir}/control"
 
-copy_package() {
-    local sdk_dir="${BUILD_DIR}/openwrt-sdk"
-    local pkg_dir="${sdk_dir}/package/skadik-gate"
-    
-    log "Copying package sources..."
-    mkdir -p "$pkg_dir"
-    
-    cp -r "${SCRIPT_DIR}/files" "$pkg_dir/"
-    cp -r "${SCRIPT_DIR}/luci-app-skadik-gate" "$pkg_dir/"
-    cp "${SCRIPT_DIR}/package/Makefile" "$pkg_dir/Makefile"
-    
-    log "Package sources copied to SDK"
-}
+    rm -rf "${pkg_dir}"
+    mkdir -p "${data_dir}" "${control_dir}"
 
-build_packages() {
-    local sdk_dir="${BUILD_DIR}/openwrt-sdk"
-    
-    log "Building packages..."
-    cd "$sdk_dir"
-    
-    make package/skadik-gate/compile V=s -j$(nproc) 2>&1 || {
-        log "Trying single-threaded build..."
-        make package/skadik-gate/compile V=s
-    }
-    
-    log "Build complete!"
-}
+    eval "${build_files_func} '${data_dir}'"
 
-collect_packages() {
-    local sdk_dir="${BUILD_DIR}/openwrt-sdk"
-    
-    log "Collecting .ipk packages..."
-    mkdir -p "$PACKAGES_DIR"
-    
-    find "$sdk_dir/bin/packages" -name "skadik-gate_*.ipk" -exec cp {} "$PACKAGES_DIR/" \;
-    find "$sdk_dir/bin/packages" -name "luci-app-skadik-gate_*.ipk" -exec cp {} "$PACKAGES_DIR/" \;
-    
-    log "Packages saved to: ${PACKAGES_DIR}"
-    ls -la "$PACKAGES_DIR"/*.ipk 2>/dev/null
-}
-
-show_usage() {
-    cat <<EOF
-Skadik-Gate Build Script
-
-Usage: $0 [OPTIONS] [ARCHITECTURE]
-
-Options:
-  -h, --help          Show this help
-  -c, --clean         Clean build directory
-  -s, --sdk-only      Download SDK only (don't build)
-  -k, --keep-sdk      Keep SDK after build
-
-Architecture:
-  x86_64              For x86_64 routers
-  aarch64             For ARM64 routers
-  arm_cortex_a7       For ARM Cortex-A7 routers
-  auto                Auto-detect (default)
-
-Examples:
-  ./build.sh                    # Auto-detect and build
-  ./build.sh x86_64             # Build for x86_64
-  ./build.sh --clean            # Clean and rebuild
+    cat > "${control_dir}/control" <<EOF
+Package: ${pkg_name}
+Version: ${VERSION}
+Depends: ${depends}
+Architecture: ${ARCH}
+Maintainer: Skadik <noreply@skadik.dev>
+Section: ${section}
+Source: https://github.com/RaconFloup/Skadik-Gate
+Description: ${description}
 EOF
+
+    printf '/etc/config/skadik-gate\n/etc/skadik-gate/\n' > "${control_dir}/conffiles"
+
+    cat > "${control_dir}/postinst" <<'POSTINST'
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+    chmod +x /usr/bin/skadik-gate 2>/dev/null
+    chmod +x /usr/bin/skadik-gate-sub 2>/dev/null
+    chmod +x /usr/share/skadik-gate/*.sh 2>/dev/null
+    chmod +x /etc/init.d/skadik-gate 2>/dev/null
+    mkdir -p /etc/skadik-gate/nodes
+    mkdir -p /var/log/skadik-gate
+    /etc/init.d/skadik-gate enable 2>/dev/null
+}
+POSTINST
+
+    cat > "${control_dir}/prerm" <<'PRERM'
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+    /etc/init.d/skadik-gate stop 2>/dev/null
+    /etc/init.d/skadik-gate disable 2>/dev/null
+}
+PRERM
+
+    printf '2.0\n' > "${pkg_dir}/debian-binary"
+
+    pushd "${data_dir}" > /dev/null
+    find . -type f | sed 's|^\./||' | tar -czf "${pkg_dir}/data.tar.gz" -T -
+    popd > /dev/null
+
+    pushd "${control_dir}" > /dev/null
+    tar -czf "${pkg_dir}/control.tar.gz" *
+    popd > /dev/null
+
+    local ipk_name="${pkg_name}_${VERSION}_${ARCH}.ipk"
+    local ipk_path="${BUILD_DIR}/${ipk_name}"
+
+    pushd "${pkg_dir}" > /dev/null
+    ar rcsD "${ipk_path}" debian-binary control.tar.gz data.tar.gz
+    popd > /dev/null
+
+    gzip -9 -f "${ipk_path}"
+
+    local size
+    size=$(stat -c%s "${ipk_path}" 2>/dev/null || stat -f%z "${ipk_path}")
+    echo -e "${GREEN}OK: ${ipk_name} (${size} bytes)${NC}"
 }
 
-clean_build() {
-    log "Cleaning build directory..."
-    rm -rf "$BUILD_DIR" "$PACKAGES_DIR"
-    log "Clean complete"
+build_core() {
+    local data_dir="$1"
+    mkdir -p "${data_dir}"/{etc/config,etc/init.d,etc/cron.d,etc/uci-defaults,usr/bin,usr/share/skadik-gate}
+
+    cp "${SCRIPT_DIR}/files/etc/config/skadik-gate" "${data_dir}/etc/config/"
+    cp "${SCRIPT_DIR}/files/etc/init.d/skadik-gate" "${data_dir}/etc/init.d/"
+    cp "${SCRIPT_DIR}/files/etc/cron.d/skadik-gate" "${data_dir}/etc/cron.d/"
+    cp "${SCRIPT_DIR}/files/etc/uci-defaults/skadik-gate" "${data_dir}/etc/uci-defaults/"
+    cp "${SCRIPT_DIR}/files/usr/bin/skadik-gate" "${data_dir}/usr/bin/"
+    cp "${SCRIPT_DIR}/files/usr/bin/skadik-gate-sub" "${data_dir}/usr/bin/"
+    cp "${SCRIPT_DIR}/files/usr/share/skadik-gate/"*.sh "${data_dir}/usr/share/skadik-gate/"
 }
 
-main() {
-    local arch=""
-    local sdk_only=0
-    local keep_sdk=0
-    
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -h|--help)    show_usage; exit 0 ;;
-            -c|--clean)   clean_build; exit 0 ;;
-            -s|--sdk-only) sdk_only=1 ;;
-            -k|--keep-sdk) keep_sdk=1 ;;
-            x86_64)       arch="x86/64" ;;
-            aarch64)      arch="aarch64/generic" ;;
-            arm_cortex_a7) arch="arm/cortex-a7" ;;
-            auto)         arch="" ;;
-            *)            err "Unknown option: $1" ;;
-        esac
-        shift
-    done
-    
-    [ -z "$arch" ] && arch=$(detect_arch)
-    
-    log "Target architecture: ${arch}"
-    
-    download_sdk "$arch"
-    setup_sdk
-    copy_package
-    build_packages
-    collect_packages
-    
-    if [ "$keep_sdk" -eq 0 ]; then
-        log "Cleaning SDK..."
-        rm -rf "${BUILD_DIR}/openwrt-sdk"
-    fi
-    
-    log "=== BUILD COMPLETE ==="
-    log "Packages ready in: ${PACKAGES_DIR}"
-    log ""
-    log "Install on router with:"
-    log "  scp ${PACKAGES_DIR}/*.ipk root@router:/tmp/"
-    log "  ssh root@router 'opkg install /tmp/skadik-gate_*.ipk /tmp/luci-app-skadik-gate_*.ipk'"
+build_luci() {
+    local data_dir="$1"
+    mkdir -p "${data_dir}"/{usr/lib/lua/luci/controller,usr/lib/lua/luci/model/cbi/skadik-gate,usr/lib/lua/luci/view/skadik-gate,usr/lib/lua/luci/i18n}
+
+    cp "${SCRIPT_DIR}/luci-app-skadik-gate/luasrc/controller/skadik-gate.lua" "${data_dir}/usr/lib/lua/luci/controller/"
+    cp "${SCRIPT_DIR}/luci-app-skadik-gate/luasrc/model/cbi/skadik-gate/"*.lua "${data_dir}/usr/lib/lua/luci/model/cbi/skadik-gate/"
+    cp "${SCRIPT_DIR}/luci-app-skadik-gate/luasrc/view/skadik-gate/"*.htm "${data_dir}/usr/lib/lua/luci/view/skadik-gate/"
+
+    echo -e "  Compiling i18n translations..."
+    compile_po2lmo "${SCRIPT_DIR}/luci-app-skadik-gate/luasrc/i18n/skadik-gate.en.po" \
+                   "${data_dir}/usr/lib/lua/luci/i18n/skadik-gate.en.lmo"
+    compile_po2lmo "${SCRIPT_DIR}/luci-app-skadik-gate/luasrc/i18n/skadik-gate.ru.po" \
+                   "${data_dir}/usr/lib/lua/luci/i18n/skadik-gate.ru.lmo"
 }
 
-main "$@"
+build_ipk "skadik-gate" \
+    "Skadik-Gate VPN Client for Remnawave panel" \
+    "xray-core, curl, kmod-nft-tproxy, nftables, ip-full" \
+    "net" \
+    "build_core"
+
+build_ipk "luci-app-skadik-gate" \
+    "LuCI web interface for Skadik-Gate VPN client" \
+    "skadik-gate, luci-base, luci-compat" \
+    "luci" \
+    "build_luci"
+
+echo ""
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}  BUILD COMPLETE${NC}"
+echo -e "${GREEN}============================================${NC}"
+echo ""
+echo -e "${CYAN}Packages:${NC}"
+ls -la "${BUILD_DIR}"/*.ipk.gz 2>/dev/null | while read line; do
+    echo "  $line"
+done

@@ -1,0 +1,335 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+
+msgid "Skadik-Gate"
+msgstr "Skadik-Gate"
+
+msgid "General"
+msgstr "General"
+
+msgid "Nodes"
+msgstr "Nodes"
+
+msgid "Rules"
+msgstr "Rules"
+
+msgid "Devices"
+msgstr "Devices"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Skadik-Gate - General"
+msgstr "Skadik-Gate - General"
+
+msgid "Configure the Skadik-Gate VPN client for OpenWRT."
+msgstr "Configure the Skadik-Gate VPN client for OpenWRT."
+
+msgid "General Settings"
+msgstr "General Settings"
+
+msgid "Enable"
+msgstr "Enable"
+
+msgid "Enable or disable the Skadik-Gate service"
+msgstr "Enable or disable the Skadik-Gate service"
+
+msgid "Subscription URL"
+msgstr "Subscription URL"
+
+msgid "Remnawave subscription URL (e.g. https://panel.com/api/v1/client/subscribe?token=xxx)"
+msgstr "Remnawave subscription URL (e.g. https://panel.com/api/v1/client/subscribe?token=xxx)"
+
+msgid "Fetch Subscription"
+msgstr "Fetch Subscription"
+
+msgid "Download and parse the subscription"
+msgstr "Download and parse the subscription"
+
+msgid "Service Settings"
+msgstr "Service Settings"
+
+msgid "TPROXY Port"
+msgstr "TPROXY Port"
+
+msgid "Port for transparent proxy"
+msgstr "Port for transparent proxy"
+
+msgid "DNS Port"
+msgstr "DNS Port"
+
+msgid "Port for DNS forwarding"
+msgstr "Port for DNS forwarding"
+
+msgid "SOCKS Port"
+msgstr "SOCKS Port"
+
+msgid "Port for SOCKS5 proxy"
+msgstr "Port for SOCKS5 proxy"
+
+msgid "Xray Log Level"
+msgstr "Xray Log Level"
+
+msgid "Logging verbosity of xray-core"
+msgstr "Logging verbosity of xray-core"
+
+msgid "None"
+msgstr "None"
+
+msgid "Error"
+msgstr "Error"
+
+msgid "Warning"
+msgstr "Warning"
+
+msgid "Info"
+msgstr "Info"
+
+msgid "Debug"
+msgstr "Debug"
+
+msgid "Auto Update"
+msgstr "Auto Update"
+
+msgid "Automatically update subscription"
+msgstr "Automatically update subscription"
+
+msgid "Update Interval (seconds)"
+msgstr "Update Interval (seconds)"
+
+msgid "How often to check for subscription updates"
+msgstr "How often to check for subscription updates"
+
+msgid "Failover Settings"
+msgstr "Failover Settings"
+
+msgid "Enable Failover"
+msgstr "Enable Failover"
+
+msgid "Automatically switch to backup node when primary is unreachable"
+msgstr "Automatically switch to backup node when primary is unreachable"
+
+msgid "Health Check"
+msgstr "Health Check"
+
+msgid "Periodically check node connectivity"
+msgstr "Periodically check node connectivity"
+
+msgid "Health Check Interval (seconds)"
+msgstr "Health Check Interval (seconds)"
+
+msgid "How often to check node health"
+msgstr "How often to check node health"
+
+msgid "Health Check Timeout (seconds)"
+msgstr "Health Check Timeout (seconds)"
+
+msgid "Timeout for connectivity check"
+msgstr "Timeout for connectivity check"
+
+msgid "Skadik-Gate - Nodes"
+msgstr "Skadik-Gate - Nodes"
+
+msgid "Manage VPN server nodes from your subscription."
+msgstr "Manage VPN server nodes from your subscription."
+
+msgid "Available Nodes"
+msgstr "Available Nodes"
+
+msgid "Nodes are automatically populated from your subscription."
+msgstr "Nodes are automatically populated from your subscription."
+
+msgid "Enabled"
+msgstr "Enabled"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "Display name for this node"
+msgstr "Display name for this node"
+
+msgid "Role"
+msgstr "Role"
+
+msgid "Primary or backup node"
+msgstr "Primary or backup node"
+
+msgid "Primary"
+msgstr "Primary"
+
+msgid "Backup"
+msgstr "Backup"
+
+msgid "Subscription"
+msgstr "Subscription"
+
+msgid "Update Subscription"
+msgstr "Update Subscription"
+
+msgid "Refresh Nodes"
+msgstr "Refresh Nodes"
+
+msgid "Test All Nodes"
+msgstr "Test All Nodes"
+
+msgid "Test Connectivity"
+msgstr "Test Connectivity"
+
+msgid "Skadik-Gate - Routing Rules"
+msgstr "Skadik-Gate - Routing Rules"
+
+msgid "Configure how traffic is routed: through VPN, directly, or blocked."
+msgstr "Configure how traffic is routed: through VPN, directly, or blocked."
+
+msgid "Routing Rules"
+msgstr "Routing Rules"
+
+msgid "Rules are evaluated from top to bottom. First matching rule wins."
+msgstr "Rules are evaluated from top to bottom. First matching rule wins."
+
+msgid "Human-readable rule name"
+msgstr "Human-readable rule name"
+
+msgid "Action"
+msgstr "Action"
+
+msgid "What to do with matching traffic"
+msgstr "What to do with matching traffic"
+
+msgid "Proxy (through VPN)"
+msgstr "Proxy (through VPN)"
+
+msgid "Direct (bypass VPN)"
+msgstr "Direct (bypass VPN)"
+
+msgid "Block (deny)"
+msgstr "Block (deny)"
+
+msgid "Match Type"
+msgstr "Match Type"
+
+msgid "Type of traffic to match"
+msgstr "Type of traffic to match"
+
+msgid "Domain"
+msgstr "Domain"
+
+msgid "IP/CIDR"
+msgstr "IP/CIDR"
+
+msgid "GeoSite List"
+msgstr "GeoSite List"
+
+msgid "GeoIP List"
+msgstr "GeoIP List"
+
+msgid "Destination"
+msgstr "Destination"
+
+msgid "Default (catch-all)"
+msgstr "Default (catch-all)"
+
+msgid "Value"
+msgstr "Value"
+
+msgid "Comma-separated values. For GeoSite/GeoIP use list name (e.g. category-ads-all, cn, private)."
+msgstr "Comma-separated values. For GeoSite/GeoIP use list name (e.g. category-ads-all, cn, private)."
+
+msgid "Quick Rules"
+msgstr "Quick Rules"
+
+msgid "Block Ads"
+msgstr "Block Ads"
+
+msgid "Add Ad Block Rule"
+msgstr "Add Ad Block Rule"
+
+msgid "Ads"
+msgstr "Ads"
+
+msgid "China Direct"
+msgstr "China Direct"
+
+msgid "Add China Direct Rule"
+msgstr "Add China Direct Rule"
+
+msgid "Private Networks"
+msgstr "Private Networks"
+
+msgid "Add Private Network Rule"
+msgstr "Add Private Network Rule"
+
+msgid "Skadik-Gate - Device Rules"
+msgstr "Skadik-Gate - Device Rules"
+
+msgid "Control which LAN devices go through VPN and which go direct."
+msgstr "Control which LAN devices go through VPN and which go direct."
+
+msgid "Device Rules"
+msgstr "Device Rules"
+
+msgid "Specify MAC addresses of devices and their routing policy."
+msgstr "Specify MAC addresses of devices and their routing policy."
+
+msgid "Device name for identification"
+msgstr "Device name for identification"
+
+msgid "MAC Address"
+msgstr "MAC Address"
+
+msgid "MAC address of the device (e.g. AA:BB:CC:DD:EE:FF)"
+msgstr "MAC address of the device (e.g. AA:BB:CC:DD:EE:FF)"
+
+msgid "IP Address"
+msgstr "IP Address"
+
+msgid "Optional: specific IP address of the device"
+msgstr "Optional: specific IP address of the device"
+
+msgid "Route this device through VPN or direct"
+msgstr "Route this device through VPN or direct"
+
+msgid "Info"
+msgstr "Info"
+
+msgid "Notes"
+msgstr "Notes"
+
+msgid "Skadik-Gate Status"
+msgstr "Skadik-Gate Status"
+
+msgid "Service Status"
+msgstr "Service Status"
+
+msgid "Active Node"
+msgstr "Active Node"
+
+msgid "Available Nodes"
+msgstr "Available Nodes"
+
+msgid "Uptime"
+msgstr "Uptime"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "Stop"
+msgstr "Stop"
+
+msgid "Restart"
+msgstr "Restart"
+
+msgid "Update Subscription"
+msgstr "Update Subscription"
+
+msgid "Health Status"
+msgstr "Health Status"
+
+msgid "Recent Logs"
+msgstr "Recent Logs"

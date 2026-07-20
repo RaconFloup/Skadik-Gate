@@ -59,6 +59,8 @@ Commands:
   health status           Show all nodes health
 
   update                  Update subscription
+  update-check            Check for new releases
+  update-install          Install latest release
   logs                    Show recent logs
   version                 Show version
 
@@ -336,6 +338,64 @@ cmd_logs() {
 	fi
 }
 
+cmd_update_check() {
+	echo -e "${BLUE}Checking for updates...${NC}"
+	local latest
+	latest=$(curl -sS --connect-timeout 10 --max-time 15 \
+		"https://api.github.com/repos/RaconFloup/Skadik-Gate/releases/latest" 2>/dev/null \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+	if [ -z "$latest" ]; then
+		echo -e "${RED}Failed to check for updates${NC}"
+		return 1
+	fi
+	echo -e "Current version: ${YELLOW}v${VERSION}${NC}"
+	echo -e "Latest version:  ${GREEN}${latest}${NC}"
+	if [ "v${VERSION}" = "$latest" ]; then
+		echo -e "${GREEN}Already up to date!${NC}"
+	else
+		echo -e "${YELLOW}Update available!${NC}"
+	fi
+}
+
+cmd_update_install() {
+	echo -e "${YELLOW}Updating Skadik-Gate to latest release...${NC}"
+	local latest
+	latest=$(curl -sS --connect-timeout 10 --max-time 15 \
+		"https://api.github.com/repos/RaconFloup/Skadik-Gate/releases/latest" 2>/dev/null \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+	if [ -z "$latest" ]; then
+		echo -e "${RED}Failed to check for updates${NC}"
+		return 1
+	fi
+	echo -e "Latest version: ${GREEN}${latest}${NC}"
+
+	local tmp_dir
+	tmp_dir=$(mktemp -d)
+
+	local base_url="https://github.com/RaconFloup/Skadik-Gate/releases/download/${latest}"
+	for pkg in skadik-gate luci-app-skadik-gate; do
+		local ipk_name="${pkg}_${VERSION#v}_all.ipk"
+		echo -e "Downloading ${pkg}..."
+		if ! curl -sS -L --connect-timeout 10 --max-time 60 \
+			-o "${tmp_dir}/${ipk_name}" \
+			"${base_url}/${ipk_name}" 2>/dev/null; then
+			echo -e "${RED}Failed to download ${pkg}${NC}"
+			rm -rf "$tmp_dir"
+			return 1
+		fi
+	done
+
+	echo -e "Installing packages..."
+	for ipk in "${tmp_dir}"/*.ipk; do
+		opkg install "$ipk" 2>/dev/null
+	done
+
+	rm -rf "$tmp_dir"
+	echo -e "${GREEN}Update complete! Restarting service...${NC}"
+	/etc/init.d/skadik-gate restart 2>/dev/null
+	echo -e "${GREEN}Skadik-Gate updated to ${latest}${NC}"
+}
+
 case "${1:-}" in
 	start)      cmd_start ;;
 	stop)       cmd_stop ;;
@@ -353,6 +413,12 @@ case "${1:-}" in
 	health)     shift; cmd_health "$@" ;;
 	update)
 		"${SG_SUB}" update
+		;;
+	update-check)
+		cmd_update_check
+		;;
+	update-install)
+		cmd_update_install
 		;;
 	logs)       cmd_logs ;;
 	version)
