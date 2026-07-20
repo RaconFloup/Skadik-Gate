@@ -76,7 +76,7 @@ function Build-IPK {
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "control"), $controlContent, [System.Text.UTF8Encoding]::new($false))
     
     # conffiles
-    $conffiles = "/etc/config/skadik-gate`n/etc/skadik-gate/`n"
+    $conffiles = "/etc/config/skadik-gate`n"
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "conffiles"), $conffiles, [System.Text.UTF8Encoding]::new($false))
     
     # postinst — must be LF only (CRLF breaks #!/bin/sh)
