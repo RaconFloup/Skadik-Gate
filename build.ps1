@@ -113,6 +113,7 @@ function Build-IPK {
 import tarfile, io, os, sys
 
 pkg_dir = sys.argv[1]
+out_ipk = sys.argv[2]
 control_dir = os.path.join(pkg_dir, 'control')
 data_dir = os.path.join(pkg_dir, 'data')
 
@@ -128,36 +129,49 @@ def add_file(t, arcname, filepath, mode):
     info.gname = 'root'
     t.addfile(info, io.BytesIO(data))
 
-# control.tar.gz with executable permissions for scripts
-ctrl_path = os.path.join(pkg_dir, 'control.tar.gz')
-with tarfile.open(ctrl_path, 'w:gz') as t:
+def add_bytes(t, arcname, data, mode):
+    info = tarfile.TarInfo(name=arcname)
+    info.size = len(data)
+    info.mode = mode
+    info.uid = 0
+    info.gid = 0
+    info.uname = 'root'
+    info.gname = 'root'
+    t.addfile(info, io.BytesIO(data))
+
+# Build inner tarballs in memory
+ctrl_buf = io.BytesIO()
+with tarfile.open(fileobj=ctrl_buf, mode='w:gz') as t:
     for name in sorted(os.listdir(control_dir)):
         fp = os.path.join(control_dir, name)
         mode = 0o755 if name in ('postinst', 'prerm') else 0o644
         add_file(t, name, fp, mode)
+ctrl_data = ctrl_buf.getvalue()
 
-# data.tar.gz with +x for scripts
-data_path = os.path.join(pkg_dir, 'data.tar.gz')
-with tarfile.open(data_path, 'w:gz') as t:
+data_buf = io.BytesIO()
+with tarfile.open(fileobj=data_buf, mode='w:gz') as t:
     for root, dirs, files in os.walk(data_dir):
         for name in sorted(files):
             fp = os.path.join(root, name)
             arcname = os.path.relpath(fp, data_dir).replace(os.sep, '/')
             mode = 0o755 if (name.endswith('.sh') or 'init.d' in arcname) else 0o644
             add_file(t, arcname, fp, mode)
+data_targz = data_buf.getvalue()
 
-print('OK: control.tar.gz=%d data.tar.gz=%d' % (os.path.getsize(ctrl_path), os.path.getsize(data_path)))
+deb_bin = b'2.0\n'
+
+# Build outer .ipk as tar.gz (opkg format)
+with tarfile.open(out_ipk, 'w:gz') as ipk:
+    add_bytes(ipk, 'debian-binary', deb_bin, 0o644)
+    add_bytes(ipk, 'control.tar.gz', ctrl_data, 0o644)
+    add_bytes(ipk, 'data.tar.gz', data_targz, 0o644)
+
+print('OK: control.tar.gz=%d data.tar.gz=%d ipk=%d' % (len(ctrl_data), len(data_targz), os.path.getsize(out_ipk)))
 "@
     [System.IO.File]::WriteAllText($buildPy, $pyScript, (New-Object System.Text.UTF8Encoding $false))
-    & $PythonExe $buildPy $PkgDir
-    
-    # Create .ipk as tar.gz (opkg format)
     $IpkName = "${PkgName}_${Version}_${Arch}.ipk"
     $IpkPath = Join-Path $BuildDir $IpkName
-    
-    Push-Location $PkgDir
-    tar -czf $IpkPath debian-binary control.tar.gz data.tar.gz
-    Pop-Location
+    & $PythonExe $buildPy $PkgDir $IpkPath
     
     $size = (Get-Item $IpkPath).Length
     Write-Host "OK: $IpkName ($size bytes)" -ForegroundColor Green
