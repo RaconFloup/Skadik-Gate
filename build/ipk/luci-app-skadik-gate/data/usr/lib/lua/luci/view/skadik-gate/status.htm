@@ -1,0 +1,96 @@
+<%#
+Skadik-Gate: LuCI Status Page
+%>
+
+<%+header%>
+
+<h2><%:Skadik-Gate Status%></h2>
+
+<fieldset class="cbi-section">
+	<legend><%:Service Status%></legend>
+	<table class="cbi-section-table" style="width: 100%;">
+		<tr>
+			<td style="width: 200px;"><strong><%:Service Status%></strong></td>
+			<td id="sg-status-service">Loading...</td>
+		</tr>
+		<tr>
+			<td><strong><%:Active Node%></strong></td>
+			<td id="sg-status-node">Loading...</td>
+		</tr>
+		<tr>
+			<td><strong><%:Available Nodes%></strong></td>
+			<td id="sg-status-nodes">Loading...</td>
+		</tr>
+		<tr>
+			<td><strong><%:Uptime%></strong></td>
+			<td id="sg-status-uptime">-</td>
+		</tr>
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section">
+	<legend><%:Actions%></legend>
+	<div style="padding: 10px;">
+		<input type="button" class="cbi-button cbi-button-apply" value="<%:Start%>" onclick="sgAction('start')" />
+		<input type="button" class="cbi-button cbi-button-reset" value="<%:Stop%>" onclick="sgAction('stop')" />
+		<input type="button" class="cbi-button cbi-button-apply" value="<%:Restart%>" onclick="sgAction('restart')" />
+		<input type="button" class="cbi-button cbi-button-apply" value="<%:Update Subscription%>" onclick="sgAction('update_sub')" />
+		<input type="button" class="cbi-button cbi-button-reset" value="<%:Health Check%>" onclick="sgHealthCheck()" />
+	</div>
+</fieldset>
+
+<fieldset class="cbi-section">
+	<legend><%:Health Status%></legend>
+	<div id="sg-health-output" style="padding: 10px; font-family: monospace; white-space: pre-wrap; background: #1a1a1a; color: #00ff00; border-radius: 5px; min-height: 50px;">Click "Health Check" to see results...</div>
+</fieldset>
+
+<fieldset class="cbi-section">
+	<legend><%:Recent Logs%></legend>
+	<div id="sg-logs" style="padding: 10px; font-family: monospace; white-space: pre-wrap; background: #1a1a1a; color: #cccccc; border-radius: 5px; max-height: 300px; overflow-y: auto;">Loading logs...</div>
+</fieldset>
+
+<script type="text/javascript">
+function sgAction(action) {
+	XHR.get('<%=luci.dispatcher.build_url("admin", "vpn", "skadik-gate", "action")%>', {
+		action: action
+	}, function(x, data) {
+		if (data && data.status === 'ok') {
+			setTimeout(sgUpdateStatus, 2000);
+		}
+	});
+}
+
+function sgHealthCheck() {
+	document.getElementById('sg-health-output').textContent = 'Running health check...';
+	XHR.get('<%=luci.dispatcher.build_url("admin", "vpn", "skadik-gate", "action")%>', {
+		action: 'health_check'
+	}, function(x, data) {
+		if (data && data.output) {
+			document.getElementById('sg-health-output').textContent = data.output;
+		}
+	});
+}
+
+function sgUpdateStatus() {
+	XHR.get('<%=luci.dispatcher.build_url("admin", "vpn", "skadik-gate", "api")%>', {
+		cmd: 'status'
+	}, function(x, data) {
+		if (data) {
+			var statusEl = document.getElementById('sg-status-service');
+			if (data.running) {
+				statusEl.innerHTML = '<span style="color: green; font-weight: bold;">RUNNING</span>';
+			} else {
+				statusEl.innerHTML = '<span style="color: red; font-weight: bold;">STOPPED</span>';
+			}
+
+			var nodeEl = document.getElementById('sg-status-node');
+			nodeEl.textContent = data.active_node || 'none';
+		}
+	});
+}
+
+sgUpdateStatus();
+setInterval(sgUpdateStatus, 10000);
+</script>
+
+<%+footer%>

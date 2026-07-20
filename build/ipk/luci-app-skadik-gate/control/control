@@ -1,0 +1,8 @@
+Package: luci-app-skadik-gate
+Version: 1.0.0
+Depends: skadik-gate, luci-base, luci-compat
+Architecture: all
+Maintainer: Skadik <noreply@skadik.dev>
+Section: luci
+Source: https://github.com/RaconFloup/Skadik-Gate
+Description: LuCI web interface for Skadik-Gate VPN client

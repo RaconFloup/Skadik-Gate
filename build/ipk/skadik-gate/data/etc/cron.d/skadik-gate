@@ -1,0 +1,19 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+config_load skadik-gate
+config_get_bool auto_update main auto_update 0
+config_get update_interval main update_interval 3600
+
+[ "$auto_update" -eq 1 ] || exit 0
+
+MIN=$((RANDOM % 60))
+HOURS=$((update_interval / 3600))
+
+if [ "$HOURS" -ge 1 ]; then
+	echo "0 */${HOURS} * * * /usr/bin/skadik-gate-sub update >/dev/null 2>&1"
+else
+	MINS=$((update_interval / 60))
+	echo "*/${MINS} * * * * /usr/bin/skadik-gate-sub update >/dev/null 2>&1"
+fi

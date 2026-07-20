@@ -1,0 +1,435 @@
+#!/bin/sh
+# Skadik-Gate: CLI utility
+# Main control interface for the VPN client
+
+SG_CONF_DIR="/etc/skadik-gate"
+SG_BIN="/usr/share/skadik-gate"
+SG_SUB="/usr/bin/skadik-gate-sub"
+
+VERSION="1.0.0"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_header() {
+	echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
+	echo -e "${BLUE}║       Skadik-Gate v${VERSION}              ║${NC}"
+	echo -e "${BLUE}║   OpenWRT VPN Client for Remnawave   ║${NC}"
+	echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+	echo ""
+}
+
+usage() {
+	print_header
+	cat <<EOF
+Usage: skadik-gate <command> [options]
+
+Commands:
+  start                   Start the VPN service
+  stop                    Stop the VPN service
+  restart                 Restart the VPN service
+  status                  Show service status
+  enable                  Enable service on boot
+  disable                 Disable service on boot
+
+  sub update [-f]         Fetch and parse subscription
+  sub list                List available nodes
+  sub switch <name>       Switch to a specific node
+  sub test [name]         Test node connectivity
+  sub status              Show subscription status
+
+  config show             Show current configuration
+  config set <key> <val>  Set a UCI option
+  config get <key>        Get a UCI option
+
+  rules list              List routing rules
+  rules add <name> <action> <type> <value>
+                          Add a routing rule
+  rules del <name>        Delete a routing rule
+
+  devices list            List device rules
+  devices add <name> <mac> <action>
+                          Add a device rule
+  devices del <name>      Delete a device rule
+
+  health                  Run health check
+  health status           Show all nodes health
+
+  update                  Update subscription
+  update-check            Check for new releases
+  update-install          Install latest release
+  logs                    Show recent logs
+  version                 Show version
+
+Examples:
+  skadik-gate sub update
+  skadik-gate sub switch node1
+  skadik-gate rules add "Youtube" direct domain "youtube.com,googlevideo.com"
+  skadik-gate devices add "My Phone" "AA:BB:CC:DD:EE:FF" proxy
+  skadik-gate config set main.subscription_url "https://panel.com/api/v1/client/subscribe?token=xxx"
+EOF
+}
+
+cmd_start() {
+	echo -e "${YELLOW}Starting Skadik-Gate...${NC}"
+	/etc/init.d/skadik-gate start
+	if [ $? -eq 0 ]; then
+		echo -e "${GREEN}Started successfully${NC}"
+	else
+		echo -e "${RED}Failed to start${NC}"
+	fi
+}
+
+cmd_stop() {
+	echo -e "${YELLOW}Stopping Skadik-Gate...${NC}"
+	/etc/init.d/skadik-gate stop
+	echo -e "${GREEN}Stopped${NC}"
+}
+
+cmd_restart() {
+	echo -e "${YELLOW}Restarting Skadik-Gate...${NC}"
+	/etc/init.d/skadik-gate restart
+	if [ $? -eq 0 ]; then
+		echo -e "${GREEN}Restarted successfully${NC}"
+	else
+		echo -e "${RED}Failed to restart${NC}"
+	fi
+}
+
+cmd_status() {
+	print_header
+
+	local enabled
+	config_load skadik-gate
+	config_get_bool enabled main enabled 0
+
+	if [ "$enabled" -eq 1 ]; then
+		echo -e "Service: ${GREEN}Enabled${NC}"
+	else
+		echo -e "Service: ${RED}Disabled${NC}"
+	fi
+
+	if pidof xray >/dev/null 2>&1; then
+		echo -e "Status:  ${GREEN}Running${NC}"
+	else
+		echo -e "Status:  ${RED}Stopped${NC}"
+	fi
+
+	local active_node
+	active_node=$(cat "${SG_CONF_DIR}/nodes/.active" 2>/dev/null)
+	echo -e "Node:    ${BLUE}${active_node:-none}${NC}"
+
+	local node_count
+	node_count=$(ls "${SG_CONF_DIR}/nodes/"*.outbound 2>/dev/null | wc -l)
+	echo -e "Nodes:   ${BLUE}${node_count}${NC} available"
+
+	local sub_url
+	config_get sub_url main subscription_url ""
+	if [ -n "$sub_url" ]; then
+		echo -e "Sub URL: ${BLUE}${sub_url:0:50}...${NC}"
+	else
+		echo -e "Sub URL: ${RED}Not configured${NC}"
+	fi
+
+	local uptime
+	if pidof xray >/dev/null 2>&1; then
+		local pid
+		pid=$(pidof xray)
+		uptime=$(ps -o etime= -p "$pid" 2>/dev/null)
+		echo -e "Uptime:  ${BLUE}${uptime}${NC}"
+	fi
+}
+
+cmd_enable() {
+	/etc/init.d/skadik-gate enable
+	echo -e "${GREEN}Service enabled on boot${NC}"
+}
+
+cmd_disable() {
+	/etc/init.d/skadik-gate disable
+	echo -e "${GREEN}Service disabled on boot${NC}"
+}
+
+cmd_config() {
+	local action="${1:-show}"
+	shift
+
+	case "$action" in
+		show)
+			uci show skadik-gate 2>/dev/null
+			;;
+		set)
+			local key="$1" val="$2"
+			[ -z "$key" ] || [ -z "$val" ] && { echo "Usage: skadik-gate config set <key> <value>"; return 1; }
+			uci set "skadik-gate.${key}='${val}'"
+			uci commit skadik-gate
+			echo -e "${GREEN}Set ${key} = ${val}${NC}"
+			;;
+		get)
+			local key="$1"
+			[ -z "$key" ] && { echo "Usage: skadik-gate config get <key>"; return 1; }
+			uci get "skadik-gate.${key}" 2>/dev/null
+			;;
+		*)
+			echo "Usage: skadik-gate config {show|set|get}"
+			;;
+	esac
+}
+
+cmd_rules() {
+	local action="${1:-list}"
+	shift
+
+	case "$action" in
+		list)
+			echo -e "${BLUE}=== Routing Rules ===${NC}"
+			config_load skadik-gate
+			config_foreach show_rule "rule"
+			;;
+		add)
+			local name="$1" atype="$2" rtype="$3" value="$4"
+			[ -z "$name" ] || [ -z "$atype" ] || [ -z "$rtype" ] || [ -z "$value" ] && {
+				echo "Usage: skadik-gate rules add <name> <action> <type> <value>"
+				echo "  action: proxy|direct|block"
+				echo "  type:   domain|cidr|geosite|geoip"
+				return 1
+			}
+			uci add skadik-gate rule
+			uci set skadik-gate.@rule[-1].name="$name"
+			uci set skadik-gate.@rule[-1].enabled="1"
+			uci set skadik-gate.@rule[-1].action="$atype"
+			uci set skadik-gate.@rule[-1].type="$rtype"
+			uci set skadik-gate.@rule[-1].value="$value"
+			uci commit skadik-gate
+			echo -e "${GREEN}Rule '${name}' added${NC}"
+			;;
+		del)
+			local name="$1"
+			[ -z "$name" ] && { echo "Usage: skadik-gate rules del <name>"; return 1; }
+			local section
+			config_load skadik-gate
+			config_foreach del_rule_by_name "rule" "$name"
+			uci commit skadik-gate
+			echo -e "${GREEN}Rule '${name}' deleted${NC}"
+			;;
+		*)
+			echo "Usage: skadik-gate rules {list|add|del}"
+			;;
+	esac
+}
+
+show_rule() {
+	local section="$1"
+	local name action type value enabled
+	config_get name "$section" name ""
+	config_get action "$section" action ""
+	config_get type "$section" type ""
+	config_get value "$section" value ""
+	config_get_bool enabled "$section" enabled 1
+
+	local status_color="${GREEN}ON${NC}"
+	[ "$enabled" -eq 0 ] && status_color="${RED}OFF${NC}"
+
+	case "$action" in
+		proxy)  action="${GREEN}PROXY${NC}" ;;
+		direct) action="${YELLOW}DIRECT${NC}" ;;
+		block)  action="${RED}BLOCK${NC}" ;;
+	esac
+
+	printf "  %-20s %-8s %-10s %-15s %s\n" "$name" "$action" "$type" "$status_color" "$value"
+}
+
+del_rule_by_name() {
+	local section="$1" target="$2"
+	local name
+	config_get name "$section" name ""
+	[ "$name" = "$target" ] && uci delete "skadik-gate.${section}"
+}
+
+cmd_devices() {
+	local action="${1:-list}"
+	shift
+
+	case "$action" in
+		list)
+			echo -e "${BLUE}=== Device Rules ===${NC}"
+			config_load skadik-gate
+			config_foreach show_device "device"
+			;;
+		add)
+			local name="$1" mac="$2" action="$3"
+			[ -z "$name" ] || [ -z "$mac" ] || [ -z "$action" ] && {
+				echo "Usage: skadik-gate devices add <name> <mac> <action>"
+				echo "  action: proxy|direct"
+				return 1
+			}
+			uci add skadik-gate device
+			uci set skadik-gate.@device[-1].name="$name"
+			uci set skadik-gate.@device[-1].enabled="1"
+			uci set skadik-gate.@device[-1].mac="$mac"
+			uci set skadik-gate.@device[-1].action="$action"
+			uci commit skadik-gate
+			echo -e "${GREEN}Device '${name}' added${NC}"
+			;;
+		del)
+			local name="$1"
+			[ -z "$name" ] && { echo "Usage: skadik-gate devices del <name>"; return 1; }
+			config_load skadik-gate
+			config_foreach del_device_by_name "device" "$name"
+			uci commit skadik-gate
+			echo -e "${GREEN}Device '${name}' deleted${NC}"
+			;;
+		*)
+			echo "Usage: skadik-gate devices {list|add|del}"
+			;;
+	esac
+}
+
+show_device() {
+	local section="$1"
+	local name mac action enabled
+	config_get name "$section" name ""
+	config_get mac "$section" mac ""
+	config_get action "$section" action ""
+	config_get_bool enabled "$section" enabled 1
+
+	local status_color="${GREEN}ON${NC}"
+	[ "$enabled" -eq 0 ] && status_color="${RED}OFF${NC}"
+
+	case "$action" in
+		proxy)  action="${GREEN}PROXY${NC}" ;;
+		direct) action="${YELLOW}DIRECT${NC}" ;;
+	esac
+
+	printf "  %-20s %-20s %-8s %s\n" "$name" "$mac" "$action" "$status_color"
+}
+
+del_device_by_name() {
+	local section="$1" target="$2"
+	local name
+	config_get name "$section" name ""
+	[ "$name" = "$target" ] && uci delete "skadik-gate.${section}"
+}
+
+cmd_health() {
+	local action="${1:-check}"
+	case "$action" in
+		check)
+			"${SG_BIN}/health-check.sh" check
+			;;
+		status)
+			"${SG_BIN}/health-check.sh" status
+			;;
+		*)
+			echo "Usage: skadik-gate health {check|status}"
+			;;
+	esac
+}
+
+cmd_logs() {
+	if [ -f "${SG_CONF_DIR}/error.log" ]; then
+		echo -e "${BLUE}=== Recent Logs ===${NC}"
+		tail -50 "${SG_CONF_DIR}/error.log"
+	else
+		logread | grep -i skadik-gate | tail -50
+	fi
+}
+
+cmd_update_check() {
+	echo -e "${BLUE}Checking for updates...${NC}"
+	local latest
+	latest=$(curl -sS --connect-timeout 10 --max-time 15 \
+		"https://api.github.com/repos/RaconFloup/Skadik-Gate/releases/latest" 2>/dev/null \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+	if [ -z "$latest" ]; then
+		echo -e "${RED}Failed to check for updates${NC}"
+		return 1
+	fi
+	echo -e "Current version: ${YELLOW}v${VERSION}${NC}"
+	echo -e "Latest version:  ${GREEN}${latest}${NC}"
+	if [ "v${VERSION}" = "$latest" ]; then
+		echo -e "${GREEN}Already up to date!${NC}"
+	else
+		echo -e "${YELLOW}Update available!${NC}"
+	fi
+}
+
+cmd_update_install() {
+	echo -e "${YELLOW}Updating Skadik-Gate to latest release...${NC}"
+	local latest
+	latest=$(curl -sS --connect-timeout 10 --max-time 15 \
+		"https://api.github.com/repos/RaconFloup/Skadik-Gate/releases/latest" 2>/dev/null \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+	if [ -z "$latest" ]; then
+		echo -e "${RED}Failed to check for updates${NC}"
+		return 1
+	fi
+	echo -e "Latest version: ${GREEN}${latest}${NC}"
+
+	local tmp_dir
+	tmp_dir=$(mktemp -d)
+
+	local base_url="https://github.com/RaconFloup/Skadik-Gate/releases/download/${latest}"
+	for pkg in skadik-gate luci-app-skadik-gate; do
+		local ipk_name="${pkg}_${VERSION#v}_all.ipk"
+		echo -e "Downloading ${pkg}..."
+		if ! curl -sS -L --connect-timeout 10 --max-time 60 \
+			-o "${tmp_dir}/${ipk_name}" \
+			"${base_url}/${ipk_name}" 2>/dev/null; then
+			echo -e "${RED}Failed to download ${pkg}${NC}"
+			rm -rf "$tmp_dir"
+			return 1
+		fi
+	done
+
+	echo -e "Installing packages..."
+	for ipk in "${tmp_dir}"/*.ipk; do
+		opkg install "$ipk" 2>/dev/null
+	done
+
+	rm -rf "$tmp_dir"
+	echo -e "${GREEN}Update complete! Restarting service...${NC}"
+	/etc/init.d/skadik-gate restart 2>/dev/null
+	echo -e "${GREEN}Skadik-Gate updated to ${latest}${NC}"
+}
+
+case "${1:-}" in
+	start)      cmd_start ;;
+	stop)       cmd_stop ;;
+	restart)    cmd_restart ;;
+	status)     cmd_status ;;
+	enable)     cmd_enable ;;
+	disable)    cmd_disable ;;
+	sub)
+		shift
+		"${SG_SUB}" "$@"
+		;;
+	config)     shift; cmd_config "$@" ;;
+	rules)      shift; cmd_rules "$@" ;;
+	devices)    shift; cmd_devices "$@" ;;
+	health)     shift; cmd_health "$@" ;;
+	update)
+		"${SG_SUB}" update
+		;;
+	update-check)
+		cmd_update_check
+		;;
+	update-install)
+		cmd_update_install
+		;;
+	logs)       cmd_logs ;;
+	version)
+		echo "Skadik-Gate v${VERSION}"
+		;;
+	-h|--help|"")
+		usage
+		;;
+	*)
+		echo -e "${RED}Unknown command: $1${NC}"
+		usage
+		exit 1
+		;;
+esac

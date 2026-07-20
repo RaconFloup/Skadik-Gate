@@ -1,0 +1,8 @@
+Package: skadik-gate
+Version: 1.0.0
+Depends: xray-core, curl, kmod-nft-tproxy, nftables, ip-full
+Architecture: all
+Maintainer: Skadik <noreply@skadik.dev>
+Section: net
+Source: https://github.com/RaconFloup/Skadik-Gate
+Description: Skadik-Gate VPN Client for Remnawave panel

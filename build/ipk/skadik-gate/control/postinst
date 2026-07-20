@@ -1,0 +1,10 @@
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+    chmod +x /usr/bin/skadik-gate 2>/dev/null
+    chmod +x /usr/bin/skadik-gate-sub 2>/dev/null
+    chmod +x /usr/share/skadik-gate/*.sh 2>/dev/null
+    chmod +x /etc/init.d/skadik-gate 2>/dev/null
+    mkdir -p /etc/skadik-gate/nodes
+    mkdir -p /var/log/skadik-gate
+    /etc/init.d/skadik-gate enable 2>/dev/null
+}
