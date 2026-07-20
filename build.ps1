@@ -10,6 +10,26 @@ $BuildDir = Join-Path $ScriptDir "build\ipk"
 $Version = "1.0.0"
 $Arch = "all"
 
+# Find real Python (skip Windows Store stub)
+$PythonExe = $null
+foreach ($candidate in @(
+    (Join-Path $env:LOCALAPPDATA "miniconda3\python.exe"),
+    (Join-Path $env:USERPROFILE "miniconda3\python.exe"),
+    (Join-Path $env:USERPROFILE "anaconda3\python.exe"),
+    "C:\Python313\python.exe", "C:\Python312\python.exe", "C:\Python311\python.exe",
+    "C:\Program Files\Python3*\python.exe"
+)) {
+    $found = Get-Item $candidate -ErrorAction SilentlyContinue
+    if ($found) { $PythonExe = $found.FullName; break }
+}
+if (-not $PythonExe) {
+    # Try python3 command, exclude WindowsApps stubs
+    $realPy = & { where.exe python3 2>$null } | Where-Object { $_ -notlike "*WindowsApps*" } | Select-Object -First 1
+    if ($realPy) { $PythonExe = $realPy }
+}
+if (-not $PythonExe) { throw "Python 3 not found. Install miniconda or Python 3.x." }
+Write-Host "Python: $PythonExe" -ForegroundColor DarkGray
+
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Skadik-Gate Package Builder" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
@@ -18,83 +38,6 @@ Write-Host ""
 # Clean and create build dir
 if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-
-function New-ArArchive {
-    param(
-        [string]$OutputPath,
-        [string[]]$Files
-    )
-    
-    $stream = [System.IO.File]::Create($OutputPath)
-    $writer = [System.IO.BinaryWriter]::new($stream)
-    
-    # ar magic
-    $writer.Write([System.Text.Encoding]::ASCII.GetBytes("!<arch>`n"))
-    
-    foreach ($file in $Files) {
-        $item = Get-Item $file
-        $name = $item.Name
-        $size = $item.Length
-        $data = [System.IO.File]::ReadAllBytes($file)
-        
-        # Header: name(16) + timestamp(12) + owner(6) + group(6) + mode(8) + size(10) + magic(2)
-        $header = New-Object byte[] 60
-        
-        # Name (16 bytes, padded with spaces, trailing /)
-        $nameBytes = [System.Text.Encoding]::ASCII.GetBytes($name + "/")
-        [Array]::Copy($nameBytes, 0, $header, 0, [Math]::Min($nameBytes.Length, 16))
-        
-        # Timestamp (12 bytes)
-        $ts = [System.Text.Encoding]::ASCII.GetBytes("0           ")
-        [Array]::Copy($ts, 0, $header, 16, 12)
-        
-        # Owner (6 bytes)
-        $ow = [System.Text.Encoding]::ASCII.GetBytes("0     ")
-        [Array]::Copy($ow, 0, $header, 28, 6)
-        
-        # Group (6 bytes)
-        [Array]::Copy($ow, 0, $header, 34, 6)
-        
-        # Mode (8 bytes)
-        $mode = [System.Text.Encoding]::ASCII.GetBytes("100644   ")
-        [Array]::Copy($mode, 0, $header, 40, 8)
-        
-        # Size (10 bytes, right-aligned)
-        $sizeStr = $size.ToString().PadLeft(10)
-        $sizeBytes = [System.Text.Encoding]::ASCII.GetBytes($sizeStr)
-        [Array]::Copy($sizeBytes, 0, $header, 48, 10)
-        
-        # Magic (2 bytes)
-        $header[58] = [byte]0x60  # `
-        $header[59] = [byte]0x0A  # \n
-        
-        $writer.Write($header)
-        $writer.Write($data)
-        
-        # Pad to 2-byte boundary
-        if ($size % 2 -ne 0) {
-            $writer.Write([byte]0x0A)
-        }
-    }
-    
-    $writer.Close()
-    $stream.Close()
-}
-
-function New-GzipFile {
-    param(
-        [string]$InputPath,
-        [string]$OutputPath
-    )
-    
-    $inStream = [System.IO.File]::OpenRead($InputPath)
-    $outStream = [System.IO.File]::Create($OutputPath)
-    $gzStream = [System.IO.Compression.GZipStream]::new($outStream, [System.IO.Compression.CompressionLevel]::Optimal)
-    $inStream.CopyTo($gzStream)
-    $gzStream.Close()
-    $inStream.Close()
-    $outStream.Close()
-}
 
 function Build-IPK {
     param(
@@ -136,7 +79,7 @@ function Build-IPK {
     $conffiles = "/etc/config/skadik-gate`n/etc/skadik-gate/`n"
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "conffiles"), $conffiles, [System.Text.UTF8Encoding]::new($false))
     
-    # postinst
+    # postinst — must be LF only (CRLF breaks #!/bin/sh)
     $postinst = @'
 #!/bin/sh
 [ -n "${IPKG_INSTROOT}" ] || {
@@ -148,33 +91,65 @@ function Build-IPK {
     mkdir -p /var/log/skadik-gate
     /etc/init.d/skadik-gate enable 2>/dev/null
 }
-'@
+'@ -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "postinst"), $postinst, [System.Text.UTF8Encoding]::new($false))
     
-    # prerm
+    # prerm — LF only
     $prerm = @'
 #!/bin/sh
 [ -n "${IPKG_INSTROOT}" ] || {
     /etc/init.d/skadik-gate stop 2>/dev/null
     /etc/init.d/skadik-gate disable 2>/dev/null
 }
-'@
+'@ -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText((Join-Path $ControlDir "prerm"), $prerm, [System.Text.UTF8Encoding]::new($false))
     
     # debian-binary
     [System.IO.File]::WriteAllText((Join-Path $PkgDir "debian-binary"), "2.0`n", [System.Text.UTF8Encoding]::new($false))
     
-    # Create data.tar.gz with tar
-    Push-Location $DataDir
-    $dataFiles = Get-ChildItem -Recurse -File | ForEach-Object { $_.FullName.Substring($DataDir.Length + 1) }
-    tar -czf (Join-Path $PkgDir "data.tar.gz") @dataFiles
-    Pop-Location
-    
-    # Create control.tar.gz with tar
-    Push-Location $ControlDir
-    $controlFiles = Get-ChildItem -File | ForEach-Object { $_.Name }
-    tar -czf (Join-Path $PkgDir "control.tar.gz") @controlFiles
-    Pop-Location
+    # Create control.tar.gz and data.tar.gz via Python (handles LF + Unix permissions)
+    $buildPy = Join-Path $PkgDir "build_pkg.py"
+    $pyScript = @"
+import tarfile, io, os, sys
+
+pkg_dir = sys.argv[1]
+control_dir = os.path.join(pkg_dir, 'control')
+data_dir = os.path.join(pkg_dir, 'data')
+
+def add_file(t, arcname, filepath, mode):
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    info = tarfile.TarInfo(name=arcname)
+    info.size = len(data)
+    info.mode = mode
+    info.uid = 0
+    info.gid = 0
+    info.uname = 'root'
+    info.gname = 'root'
+    t.addfile(info, io.BytesIO(data))
+
+# control.tar.gz with executable permissions for scripts
+ctrl_path = os.path.join(pkg_dir, 'control.tar.gz')
+with tarfile.open(ctrl_path, 'w:gz') as t:
+    for name in sorted(os.listdir(control_dir)):
+        fp = os.path.join(control_dir, name)
+        mode = 0o755 if name in ('postinst', 'prerm') else 0o644
+        add_file(t, name, fp, mode)
+
+# data.tar.gz with +x for scripts
+data_path = os.path.join(pkg_dir, 'data.tar.gz')
+with tarfile.open(data_path, 'w:gz') as t:
+    for root, dirs, files in os.walk(data_dir):
+        for name in sorted(files):
+            fp = os.path.join(root, name)
+            arcname = os.path.relpath(fp, data_dir).replace(os.sep, '/')
+            mode = 0o755 if (name.endswith('.sh') or 'init.d' in arcname) else 0o644
+            add_file(t, arcname, fp, mode)
+
+print('OK: control.tar.gz=%d data.tar.gz=%d' % (os.path.getsize(ctrl_path), os.path.getsize(data_path)))
+"@
+    [System.IO.File]::WriteAllText($buildPy, $pyScript, (New-Object System.Text.UTF8Encoding $false))
+    & $PythonExe $buildPy $PkgDir
     
     # Create .ipk as tar.gz (opkg format)
     $IpkName = "${PkgName}_${Version}_${Arch}.ipk"
@@ -266,10 +241,9 @@ $luciFiles = Build-IPK -PkgName "luci-app-skadik-gate" `
         $po2lmo = Join-Path $ScriptDir "build\po2lmo.py"
         $i18nSrc = Join-Path $ScriptDir "luci-app-skadik-gate\luasrc\i18n"
         $i18nDst = Join-Path $DataDir "usr\lib\lua\luci\i18n"
-        $py = "python"
         foreach ($po in Get-ChildItem "$i18nSrc\*.po") {
             $lmoName = $po.BaseName + ".lmo"
-            & $py $po2lmo.FullName $po.FullName (Join-Path $i18nDst $lmoName)
+            & $PythonExe $po2lmo $po.FullName (Join-Path $i18nDst $lmoName)
         }
     }
 
