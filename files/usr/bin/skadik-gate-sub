@@ -102,25 +102,31 @@ fetch_subscription() {
 		return 0
 	fi
 
-	# Check if content is base64-encoded (no newlines, only valid base64 chars)
-	local first_line
-	first_line=$(head -1 "$tmp_file")
-	if echo "$first_line" | grep -qE '^[A-Za-z0-9+/]+=*$' && ! echo "$first_line" | grep -q '://'; then
-		log "Content appears base64-encoded, decoding..."
-		local decoded
-		decoded=$(cat "$tmp_file" | base64_decode)
-		if [ -n "$decoded" ]; then
-			echo "$decoded" > "$SG_LINKS_FILE"
-			local count=$(wc -l < "$SG_LINKS_FILE")
-			log "Decoded ${count} lines from base64"
-			rm -f "$tmp_file"
-			return 0
-		fi
-		log "WARNING: base64 decode failed, trying as-is"
+	# Try base64 decode — subscription providers typically return base64
+	local decoded
+	decoded=$(cat "$tmp_file" | base64_decode)
+	local has_links=0
+	[ -n "$decoded" ] && echo "$decoded" | head -1 | grep -q 'vless\|trojan\|ss://' && has_links=1
+
+	if [ "$has_links" -eq 1 ]; then
+		log "Decoded subscription from base64"
+		mkdir -p "$SG_NODES_DIR"
+		printf '%s\n' "$decoded" > "$SG_LINKS_FILE"
+		log "Subscription fetched: $(wc -l < "$SG_LINKS_FILE") lines"
+		rm -f "$tmp_file"
+		return 0
 	fi
 
+	# Check if plain text already has links
+	if head -1 "$tmp_file" | grep -q 'vless\|trojan\|ss://'; then
+		mv "$tmp_file" "$SG_LINKS_FILE"
+		log "Subscription fetched (plain): $(wc -l < "$SG_LINKS_FILE") lines"
+		return 0
+	fi
+
+	# Last resort — save raw and log warning
 	mv "$tmp_file" "$SG_LINKS_FILE"
-	log "Subscription fetched: $(wc -l < "$SG_LINKS_FILE") lines"
+	log "WARNING: No recognizable links in subscription"
 	return 0
 }
 
