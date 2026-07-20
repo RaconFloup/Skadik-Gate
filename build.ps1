@@ -110,7 +110,7 @@ function Build-IPK {
     # Create control.tar.gz and data.tar.gz via Python (handles LF + Unix permissions)
     $buildPy = Join-Path $PkgDir "build_pkg.py"
     $pyScript = @"
-import tarfile, io, os, sys
+import tarfile, io, os, sys, gzip, time
 
 pkg_dir = sys.argv[1]
 out_ipk = sys.argv[2]
@@ -156,17 +156,35 @@ with tarfile.open(fileobj=data_buf, mode='w:gz') as t:
             arcname = os.path.relpath(fp, data_dir).replace(os.sep, '/')
             mode = 0o755 if (name.endswith('.sh') or 'init.d' in arcname) else 0o644
             add_file(t, arcname, fp, mode)
-data_targz = data_buf.getvalue()
+data_data = data_buf.getvalue()
 
 deb_bin = b'2.0\n'
 
-# Build outer .ipk as tar.gz (opkg format)
-with tarfile.open(out_ipk, 'w:gz') as ipk:
-    add_bytes(ipk, 'debian-binary', deb_bin, 0o644)
-    add_bytes(ipk, 'control.tar.gz', ctrl_data, 0o644)
-    add_bytes(ipk, 'data.tar.gz', data_targz, 0o644)
+# Build outer .ipk as ar archive then gzip (opkg format)
+def ar_entry(name, data, mode=0o644):
+    now = int(time.time())
+    header = bytearray(60)
+    header[0:16] = name.encode('ascii').ljust(16)
+    header[16:28] = str(now).encode('ascii').ljust(12)
+    header[28:34] = b'0'.ljust(6)
+    header[34:40] = b'0'.ljust(6)
+    header[40:48] = ('%o' % mode).encode('ascii').ljust(8)
+    header[48:58] = str(len(data)).encode('ascii').rjust(10)
+    header[58:60] = b'\x60\x0a'
+    result = bytes(header) + data
+    if len(data) % 2:
+        result += b'\n'
+    return result
 
-print('OK: control.tar.gz=%d data.tar.gz=%d ipk=%d' % (len(ctrl_data), len(data_targz), os.path.getsize(out_ipk)))
+raw = b'!<arch>\n'
+raw += ar_entry('debian-binary', deb_bin)
+raw += ar_entry('control.tar.gz', ctrl_data)
+raw += ar_entry('data.tar.gz', data_data)
+
+with gzip.open(out_ipk, 'wb') as f:
+    f.write(raw)
+
+print('OK: control.tar.gz=%d data.tar.gz=%d ipk=%d' % (len(ctrl_data), len(data_data), os.path.getsize(out_ipk)))
 "@
     [System.IO.File]::WriteAllText($buildPy, $pyScript, (New-Object System.Text.UTF8Encoding $false))
     $IpkName = "${PkgName}_${Version}_${Arch}.ipk"
