@@ -14,7 +14,7 @@ o.rmempty = false
 
 o = s:option(Value, "subscription_url", translate("Subscription URL"),
 	translate("Remnawave subscription URL (e.g. https://panel.com/api/v1/client/subscribe?token=xxx)"))
-o.datatype = "url"
+o.datatype = "string"
 o.rmempty = false
 o.size = 80
 
