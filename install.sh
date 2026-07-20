@@ -57,9 +57,9 @@ download_file() {
     local url="${REPO_URL}/${path}"
     
     log "Downloading ${path}..."
-    curl -sS -L -o "${dest}" "${url}" || {
-        warn "curl failed, trying wget..."
-        wget -q -O "${dest}" "${url}" 2>/dev/null || err "Failed to download ${path}"
+    wget -q -O "${dest}" "${url}" 2>/dev/null || {
+        warn "wget failed, trying curl..."
+        curl -sS -L --connect-timeout 10 --max-time 30 -o "${dest}" "${url}" || err "Failed to download ${path}"
     }
 }
 
