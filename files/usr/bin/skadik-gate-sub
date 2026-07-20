@@ -11,7 +11,35 @@ SG_LINKS_FILE="${SG_CONF_DIR}/links.txt"
 SG_BIN="/usr/share/skadik-gate"
 SG_VLESS_PARSER="${SG_BIN}/vless-parser.sh"
 
-log() { logger -t skadik-gate-sub "$@"; }
+log() { logger -t skadik-gate-sub "$@"; echo "$@" >&2; }
+
+base64_decode() {
+	awk 'BEGIN {
+		b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+		for (i = 0; i < 64; i++) {
+			c = substr(b64, i+1, 1)
+			val[c] = i
+		}
+	}
+	{
+		gsub(/[^A-Za-z0-9+\/=]/, "")
+		gsub(/\n/, "")
+		line = $0
+		len = length(line)
+		result = ""
+		for (i = 1; i <= len; i += 4) {
+			c1 = val[substr(line, i, 1)] + 0
+			c2 = (i+1 <= len) ? val[substr(line, i+1, 1)] + 0 : 0
+			c3 = (i+2 <= len) ? val[substr(line, i+2, 1)] + 0 : 0
+			c4 = (i+3 <= len) ? val[substr(line, i+3, 1)] + 0 : 0
+			result = result sprintf("%c", (c1 * 4) + int(c2 / 16))
+			if (i+2 <= len && substr(line, i+2, 1) != "=")
+				result = result sprintf("%c", ((c2 % 16) * 16) + int(c3 / 4))
+			if (i+3 <= len && substr(line, i+3, 1) != "=")
+				result = result sprintf("%c", ((c3 % 4) * 64) + c4)
+		}
+		printf "%s", result
+	}'
 
 usage() {
 	cat <<EOF
@@ -72,6 +100,23 @@ fetch_subscription() {
 		log "Got Xray JSON subscription format"
 		mv "$tmp_file" "${SG_NODES_DIR}/xray-json-outbounds.json"
 		return 0
+	fi
+
+	# Check if content is base64-encoded (no newlines, only valid base64 chars)
+	local first_line
+	first_line=$(head -1 "$tmp_file")
+	if echo "$first_line" | grep -qE '^[A-Za-z0-9+/]+=*$' && ! echo "$first_line" | grep -q '://'; then
+		log "Content appears base64-encoded, decoding..."
+		local decoded
+		decoded=$(cat "$tmp_file" | base64_decode)
+		if [ -n "$decoded" ]; then
+			echo "$decoded" > "$SG_LINKS_FILE"
+			local count=$(wc -l < "$SG_LINKS_FILE")
+			log "Decoded ${count} lines from base64"
+			rm -f "$tmp_file"
+			return 0
+		fi
+		log "WARNING: base64 decode failed, trying as-is"
 	fi
 
 	mv "$tmp_file" "$SG_LINKS_FILE"
